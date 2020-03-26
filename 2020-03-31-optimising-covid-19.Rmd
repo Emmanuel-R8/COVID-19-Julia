@@ -1,0 +1,339 @@
+---
+title: "Optimising the COVID-19 Forecast Model"
+author: "Emmanuel Rialland"
+date: '2020-03-30'
+slug: 2020-03-30-optomising-covid-19
+categories:
+- Data Science
+- Julia
+tags:
+- Data Science
+- Julia
+- COVID-19
+mathjax: yes
+description: ''
+thumbnail: ''
+draft: trus
+---
+
+
+```{r echo=FALSE,message=FALSE}
+JuliaCall::julia_markdown_setup(JULIA_HOME = "/opt/julia/bin", notebook = TRUE)
+```
+
+
+# The [Neherlab COVID-19](https://neherlab.org/covid19/) forecast model
+
+
+```{julia}
+include("COVID-19.jl")
+```
+
+This is the start of a country specific data structure. A dictionary is good enough for that purpose.
+
+```{julia}
+countryData = Dict();
+```
+
+We start a country's record with an empty dictionary using Italy as a starting example populated with an R₀.
+
+```{julia}
+countryData["Italy"] = Dict(:name = "Italy",
+                            :R₀ => Base R₀)
+```
+
+Each country needs an location which gives it peak cold date
+
+```{julia}
+countryData["Italy"][:hemisphere] = :north;
+
+countryData["Italy"][:peak] = peakDate[countryData["Italy"][:hemisphere]];
+countryData["Italy"][:ϵ]    = ϵ[countryData["Italy"][:hemisphere]];
+```
+
+Let's try a simple mitigation profile
+
+```{julia}
+countryData["Italy"][:mitigation] = [(0, 1.00), (30, 0.80), (60, 0.20), (150, 0.50)];
+```
+
+Let's source the latest data from the Neherlab repo
+
+```{r}
+
+```
+
+
+
+```{r}
+    country_codes = @where(country_codes, occursin.(country, :name))
+    countryShort = country_codes[:, Symbol("alpha-3")][1]
+
+    cases = @where(cases, occursin.(country, :location))
+    sort!(cases, :time)
+
+        ICU_capacity = @where(ICU_capacity, occursin.(country, :country))[!, :CriticalCare][1]
+    ICU_capacity = convert(Float64, ICU_capacity)
+    
+        hospital_capacity = last(@where(hospital_capacity, occursin.(countryShort, :COUNTRY)), 1)[!, :VALUE][1]
+    hospital_capacity = convert(Float64, hospital_capacity)
+
+        age_distribution = @where(age_distribution, occursin.(country, :_key))[!, 2:10]
+
+    
+```
+
+
+
+
+
+```{julia}
+using PyPlot;
+
+pyplot();
+clf();
+ioff();
+plot_x = cases.time;
+plot_y = cases.deaths;
+
+fig, ax = PyPlot.subplots();
+
+ax.plot(plot_x, plot_y, "ro");
+ax.fill_between(plot_x, plot_y, color="red", linewidth=2, label="Deaths", alpha=0.3);
+ax.legend(loc="upper left");
+ax.set_xlabel("time");
+ax.set_ylabel("Deaths");
+ax.set_yscale("log");
+
+PyPlot.savefig("images/Deaths.png");
+```
+
+![Deaths](images/Deaths.png)
+
+
+This file contains ICU beds figures.
+
+
+
+# Convert to simple matrix
+age_distribution = Matrix(age_distribution);
+show(age_distribution);
+```
+
+
+# Initialise parameters
+
+## Fixed constants
+
+
+```{julia}
+SeverityLevel = :moderate;
+Latitude = :north;
+
+StartDate = Date(2020, 3, 1);
+StartDays = date2days(StartDate);
+
+EndDate = Date(2020, 9, 1);
+EndDays = date2days(EndDate);
+
+tSpan = (StartDays, EndDays);
+```
+
+## Infrastructure
+
+
+```{julia}
+BED_max = hospital_capacity
+```
+
+
+
+```{julia}
+ICU_max = ICU_capacity
+```
+
+
+## Parameter vector
+
+
+```{julia}
+# r₀, tₗ, tᵢ, tₕ, tᵤ, γᵢ, γⱼ, γₖ, δₖ, δₗ, δᵤ, startDate = params 
+
+parameters = [  baseR₀[Latitude, SeverityLevel], 
+                tₗ[SeverityLevel], tᵢ[SeverityLevel], tₕ, tᵤ, 
+                γₑ, γᵢ, γⱼ, γₖ, 
+                δₖ, δₗ, δᵤ, 
+                StartDays];
+```
+
+## Population
+
+
+```{julia}
+Age_Pyramid = transpose(age_distribution);
+Age_Pyramid_frac = Age_Pyramid / sum(Age_Pyramid);
+```
+
+We do not know the number of actual number of infections cases at the start of the model. We only know confirmed cases (almost certainly far below the number of actual infections).
+
+We assume that actual infections are 3 time more numerous. 
+
+
+```{julia}
+DeathsAtStart = @where(cases, :time .== StartDate)[!, :deaths][1];
+ConfirmedAtStart = @where(cases, :time .== StartDate)[!, :cases][1];
+EstimatedAtStart = 3.0 * ConfirmedAtStart;
+```
+
+
+
+## Parameters vector
+
+
+```{julia}
+# Note that values are inintialised at 1 to avoid division by zero
+
+S0 = Age_Pyramid;
+E0 = ones(nAgeGroup);
+I0 = EstimatedAtStart * Age_Pyramid_frac;
+J0 = ones(nAgeGroup);
+H0 = ones(nAgeGroup);
+C0 = ones(nAgeGroup);
+R0 = ones(nAgeGroup);
+D0 = DeathsAtStart * Age_Pyramid_frac;
+K0 = ones(nAgeGroup);
+L0 = ones(nAgeGroup);
+
+# Everybody confirmed is in hospital
+BED = [ConfirmedAtStart];
+ICU = [1.0];
+
+P0 = vcat(S0, E0, I0, J0, H0, C0, R0, D0, K0, L0, BED, ICU);
+dP = 0 * P0;
+```
+
+# Differential equation solver
+
+
+```{julia}
+model = ODEProblem(epiDynamics!, P0, tSpan, parameters);
+```
+
+
+```{julia}
+# Note: progress steps might be too quick to see!
+sol = solve(model, Tsit5(); progress = false, progress_steps = 5);
+```
+
+
+```{julia}
+# The solutions are returned as an Array of Arrays: 
+#  - it is a vector of size the number of timesteps
+#  - each element of the vector is a vector of all the variables
+nSteps = length(sol.t);
+nVars  = length(sol.u[1]);
+
+# Empty dataframe to contain all the numbers
+# (When running a loop at top-level, the global keywrod is necessary to modify global variables.)
+solDF = zeros((nSteps, nVars));
+for i = 1:nSteps
+    global solDF
+    solDF[i, :] = sol.u[i]
+end;
+
+solDF = hcat(DataFrame(t = sol.t), DataFrame(solDF));
+
+# Let's clean the names
+compartments =  ["S", "E", "I", "J", "H", "C", "R", "D", "K", "L"];
+solnames = vcat([:t], [Symbol(c * repr(n)) for c in compartments for n in 0:(nAgeGroup-1)], [:Beds], [:ICU]);
+rename!(solDF, solnames);
+
+```
+
+
+```{julia}
+# Create sums for each compartment
+# (Consider solDF[!, r"S"])
+# 
+for c in compartments
+    col =  [Symbol(c * repr(n)) for n in 0:(nAgeGroup-1)]
+    s = DataFrame(C = sum.(eachrow(solDF[:, col])))
+    rename!(s, [Symbol(c)])
+        
+    global solDF = hcat(solDF, s)
+end;
+
+# The D column gives the final number of dead.
+println(last(solDF[:, Symbol.(compartments)], 5))
+```
+
+
+
+The last row shows the final sizes of the various compartments.
+
+Next is the evolution of the over time.
+
+
+```{julia}
+pyplot();
+clf();
+ioff();
+
+fig, ax = PyPlot.subplots();
+
+ax.plot(solDF.t, solDF.D, label = "Recoveries");
+ax.plot(solDF.t, solDF.R, label = "Forecast");
+ax.plot(cases.t, cases.deaths, "ro", label = "Actual", alpha = 0.3);
+
+ax.legend(loc="lower right");
+ax.set_xlabel("time");
+ax.set_ylabel("Individuals");
+ax.set_yscale("log");
+
+PyPlot.savefig("images/DeathsForecast.png");
+
+```
+
+
+
+![Increase in Recoveries and Deaths over time](images/DeathsForecast.png)
+
+
+
+It is clear the model forecasts a faster growth than reality. A parameter estimation is necessary.
+
+
+
+
+```{julia}
+pyplot();
+clf();
+ioff();
+
+fig, ax = PyPlot.subplots();
+
+ax.plot(solDF.t, solDF.Beds, label = "Beds");
+ax.plot(solDF.t, solDF.ICU, label = "ICU");
+
+ax.legend(loc="lower right");
+ax.set_xlabel("time");
+ax.set_ylabel("Number of beds");
+ax.set_yscale("linear");
+
+PyPlot.savefig("images/BedUsage.png");
+
+```
+
+
+![Bed Usage over time](images/BedUsage.png)
+
+
+It is clear that the requirements for beds quickly hits the available capacity
+
+
+
+# Bilibliography
+
+The Novel Coronavirus Pneumonia Emergency Response Epidemiology Team. The Epidemiological Characteristics of an Outbreak of 2019 Novel Coronavirus Diseases (COVID-19) — China, 2020[J]. China CDC Weekly, 2020, 2(8): 113-122. [LINK](http://weekly.chinacdc.cn/en/article/id/e53946e2-c6c4-41e9-9a9b-fea8db1a8f51)
+
+
