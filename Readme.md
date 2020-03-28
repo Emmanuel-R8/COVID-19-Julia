@@ -29,8 +29,7 @@ split into 2 consecutive steps:
 
 Those results took less than 10 minutes on my old laptop (Thinkpad x260).
 
-In summary, the results of the optimisation gives an r₀ lower than Neherlab's moderate value of 2.7. This is however
-offset by a hug number of non-identified asymptomatic and symptomatic individuals (by a factor of about 20).  The number of days assumed in each state is more or less identical to the Neherlab values apart from the number of days in ICU being about 9 days instead of 14. In addition, mortality doubles for someone in a critical condition without medical attention.
+In summary, the results of the optimisation gives an r₀ slightly lower than Neherlab's moderate value of 2.7. This is however offset by a hug number of non-identified asymptomatic and symptomatic individuals (by a factor of about 40).  The number of days assumed in each state is more or less identical to the Neherlab values.
 
 
 
