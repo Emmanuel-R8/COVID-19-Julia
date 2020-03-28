@@ -644,13 +644,6 @@ country = "Italy";
 
 
 
-```{julia echo=FALSE}
-#populationData = DataFrame(CSV.read("data/populationData.tsv"));
-#populationData = @where(populationData, occursin.(country, :name)); 
-#first(populationData, 6)
-```
-
-
 This file contains a record of cases day by day.
 
 
@@ -902,8 +895,8 @@ ioff();
 
 fig, ax = PyPlot.subplots();
 
-ax.plot(solDF.t, solDF.D, label = "Recoveries");
-ax.plot(solDF.t, solDF.R, label = "Forecast");
+ax.plot(solDF.t, solDF.D, label = "Forecast");
+ax.plot(solDF.t, solDF.R, label = "Recoveries");
 ax.plot(cases.t, cases.deaths, "ro", label = "Actual", alpha = 0.3);
 
 ax.legend(loc="lower right");

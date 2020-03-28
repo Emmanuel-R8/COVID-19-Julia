@@ -26,7 +26,7 @@ JuliaCall::julia_markdown_setup(JULIA_HOME = "/opt/julia/bin", notebook = TRUE)
 
 
 ```{julia}
-include("COVID-19.jl")
+include("COVID-19.jl");
 ```
 
 This is the start of a country specific data structure. A dictionary is good enough for that purpose.
@@ -35,90 +35,56 @@ This is the start of a country specific data structure. A dictionary is good eno
 countryData = Dict();
 ```
 
-We start a country's record with an empty dictionary using Italy as a starting example populated with an R₀.
+
+We use Italy as an example.
 
 ```{julia}
-countryData["Italy"] = Dict(:name = "Italy",
-                            :R₀ => Base R₀)
+country, hemisphere= "Italy", :north;
 ```
-
-Each country needs an location which gives it peak cold date
 
 ```{julia}
-countryData["Italy"][:hemisphere] = :north;
+countryData[country] = Dict([(:name, country),
+                             (:R₀, BaseR₀), 
+                             (:hemisphere, hemisphere)]);
 
-countryData["Italy"][:peak] = peakDate[countryData["Italy"][:hemisphere]];
-countryData["Italy"][:ϵ]    = ϵ[countryData["Italy"][:hemisphere]];
+countryData[country][:peak] = peakDate[countryData[country][:hemisphere]];
+countryData[country][:ϵ] = ϵ[countryData[country][:hemisphere]];
+countryData[country][:mitigation] = DEFAULT_MITIGATION;
+
 ```
 
-Let's try a simple mitigation profile
+
+Let's get the Neherlab repo's data (the files can be updated with `updateData()`).
 
 ```{julia}
-countryData["Italy"][:mitigation] = [(0, 1.00), (30, 0.80), (60, 0.20), (150, 0.50)];
+country_codes, cases, ICU_capacity, hospital_capacity, age_distribution = loadData();
 ```
-
-Let's source the latest data from the Neherlab repo
-
-```{r}
-
-```
-
-
-
-```{r}
-    country_codes = @where(country_codes, occursin.(country, :name))
-    countryShort = country_codes[:, Symbol("alpha-3")][1]
-
-    cases = @where(cases, occursin.(country, :location))
-    sort!(cases, :time)
-
-        ICU_capacity = @where(ICU_capacity, occursin.(country, :country))[!, :CriticalCare][1]
-    ICU_capacity = convert(Float64, ICU_capacity)
-    
-        hospital_capacity = last(@where(hospital_capacity, occursin.(countryShort, :COUNTRY)), 1)[!, :VALUE][1]
-    hospital_capacity = convert(Float64, hospital_capacity)
-
-        age_distribution = @where(age_distribution, occursin.(country, :_key))[!, 2:10]
-
-    
-```
-
-
-
 
 
 ```{julia}
-using PyPlot;
+# Clean up and extract country-specific information
+country_codes = @where(country_codes, occursin.(country, :name));
+countryShort = country_codes[:, Symbol("alpha-3")][1];
 
-pyplot();
-clf();
-ioff();
-plot_x = cases.time;
-plot_y = cases.deaths;
+cases = @where(cases, occursin.(country, :location));
+sort!(cases, :time);
 
-fig, ax = PyPlot.subplots();
+ICU_capacity = @where(ICU_capacity, occursin.(country, :country))[!, :CriticalCare][1];
+ICU_capacity = convert(Float64, ICU_capacity);
 
-ax.plot(plot_x, plot_y, "ro");
-ax.fill_between(plot_x, plot_y, color="red", linewidth=2, label="Deaths", alpha=0.3);
-ax.legend(loc="upper left");
-ax.set_xlabel("time");
-ax.set_ylabel("Deaths");
-ax.set_yscale("log");
+hospital_capacity = last(@where(hospital_capacity, occursin.(countryShort, :COUNTRY)), 1)[!, :VALUE][1];
+hospital_capacity = convert(Float64, hospital_capacity);
 
-PyPlot.savefig("images/Deaths.png");
+age_distribution = @where(age_distribution, occursin.(country, :_key))[!, 2:10];
+
+countryData[country][:country_code] = countryShort;
+countryData[country][:cases] = cases;
+countryData[country][:ICU_capacity] = ICU_capacity;
+countryData[country][:hospital_capacity] = hospital_capacity;
+countryData[country][:age_distribution] = age_distribution;
 ```
 
-![Deaths](images/Deaths.png)
 
-
-This file contains ICU beds figures.
-
-
-
-# Convert to simple matrix
-age_distribution = Matrix(age_distribution);
-show(age_distribution);
-```
 
 
 # Initialise parameters
@@ -127,9 +93,6 @@ show(age_distribution);
 
 
 ```{julia}
-SeverityLevel = :moderate;
-Latitude = :north;
-
 StartDate = Date(2020, 3, 1);
 StartDays = date2days(StartDate);
 
@@ -139,72 +102,59 @@ EndDays = date2days(EndDate);
 tSpan = (StartDays, EndDays);
 ```
 
-## Infrastructure
+## Country-specific constants
 
-
-```{julia}
-BED_max = hospital_capacity
-```
-
-
+Those are constants which cannot be changed to improve the model.
 
 ```{julia}
-ICU_max = ICU_capacity
-```
+BED_max = countryData[country][:ICU_capacity];
+ICU_max = countryData[country][:hospital_capacity] = hospital_capacity;
 
+Age_Pyramid = transpose( Matrix(countryData[country][:age_distribution]));
+Age_Pyramid_frac = Age_Pyramid / sum(Age_Pyramid);
+
+ConfirmedAtStart = @where(countryData[country][:cases], :time .== StartDate)[!, :cases][1];
+ConfirmedAtStart = ConfirmedAtStart .* Age_Pyramid_frac;
+
+DeathsAtStart = @where(countryData[country][:cases], :time .== StartDate)[!, :deaths][1];
+DeathsAtStart = DeathsAtStart .* Age_Pyramid_frac;
+```
 
 ## Parameter vector
 
 
-```{julia}
-# r₀, tₗ, tᵢ, tₕ, tᵤ, γᵢ, γⱼ, γₖ, δₖ, δₗ, δᵤ, startDate = params 
+Those are parameters which can be changed to improve the model.
 
-parameters = [  baseR₀[Latitude, SeverityLevel], 
-                tₗ[SeverityLevel], tᵢ[SeverityLevel], tₕ, tᵤ, 
-                γₑ, γᵢ, γⱼ, γₖ, 
-                δₖ, δₗ, δᵤ, 
-                StartDays];
+```{julia}
+ConfirmedAtStartMultiplier = 3.0;
+EstimatedAtStart = (ConfirmedAtStartMultiplier * ConfirmedAtStart) .* Age_Pyramid_frac;
+
+parameters = [countryData[country][:R₀], 
+              tₗ, tᵢ, tₕ, tᵤ, 
+              γₑ, γᵢ, γⱼ, γₖ, 
+              δₖ, δₗ, δᵤ, 
+              StartDays, 
+              ConfirmedAtStartMultiplier];
 ```
 
-## Population
+## Compartment vector
 
 
 ```{julia}
-Age_Pyramid = transpose(age_distribution);
-Age_Pyramid_frac = Age_Pyramid / sum(Age_Pyramid);
-```
-
-We do not know the number of actual number of infections cases at the start of the model. We only know confirmed cases (almost certainly far below the number of actual infections).
-
-We assume that actual infections are 3 time more numerous. 
-
-
-```{julia}
-DeathsAtStart = @where(cases, :time .== StartDate)[!, :deaths][1];
-ConfirmedAtStart = @where(cases, :time .== StartDate)[!, :cases][1];
-EstimatedAtStart = 3.0 * ConfirmedAtStart;
-```
-
-
-
-## Parameters vector
-
-
-```{julia}
-# Note that values are inintialised at 1 to avoid division by zero
+# Note that values are initialised at 1 to avoid division by zero
 
 S0 = Age_Pyramid;
 E0 = ones(nAgeGroup);
-I0 = EstimatedAtStart * Age_Pyramid_frac;
+I0 = EstimatedAtStart;
 J0 = ones(nAgeGroup);
 H0 = ones(nAgeGroup);
 C0 = ones(nAgeGroup);
 R0 = ones(nAgeGroup);
-D0 = DeathsAtStart * Age_Pyramid_frac;
+D0 = DeathsAtStart;
 K0 = ones(nAgeGroup);
 L0 = ones(nAgeGroup);
 
-# Everybody confirmed is in hospital
+# Everybody confirmed is in hospital. Assume 1 ICU bed to stay away from zeros.
 BED = [ConfirmedAtStart];
 ICU = [1.0];
 
@@ -216,13 +166,15 @@ dP = 0 * P0;
 
 
 ```{julia}
-model = ODEProblem(epiDynamics!, P0, tSpan, parameters);
+include("COVID-19.jl")
 ```
 
 
 ```{julia}
+model = ODEProblem(epiDynamics!, P0, tSpan, parameters);
+
 # Note: progress steps might be too quick to see!
-sol = solve(model, Tsit5(); progress = false, progress_steps = 5);
+sol = solve(model, Tsit5(); progress = false, progress_steps = 5)
 ```
 
 
@@ -266,6 +218,84 @@ end;
 # The D column gives the final number of dead.
 println(last(solDF[:, Symbol.(compartments)], 5))
 ```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+```{julia}
+using PyPlot;
+
+pyplot();
+clf();
+ioff();
+plot_x = cases.time;
+plot_y = cases.deaths;
+
+fig, ax = PyPlot.subplots();
+
+ax.plot(plot_x, plot_y, "ro");
+ax.fill_between(plot_x, plot_y, color="red", linewidth=2, label="Deaths", alpha=0.3);
+ax.legend(loc="upper left");
+ax.set_xlabel("time");
+ax.set_ylabel("Deaths");
+ax.set_yscale("log");
+
+PyPlot.savefig("images/Deaths.png");
+```
+
+![Deaths](images/Deaths.png)
+
+
+This file contains ICU beds figures.
+
+
+
+# Convert to simple matrix
+age_distribution = Matrix(age_distribution);
+show(age_distribution);
+```
+
 
 
 
