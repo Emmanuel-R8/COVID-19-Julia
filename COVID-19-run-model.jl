@@ -2,6 +2,9 @@
 #--
 #-- Create a range of default parameters
 #--
+using DataFrames, DataFramesMeta
+
+
 function createDefaultParameters()
     # Create a vector containing triplets of (parameter name, initial value, range)
     params = [  ["r₀",            BaseR₀,         (2.0, 5.0)],
@@ -30,6 +33,10 @@ function createDefaultParameters()
                 ["mv7",           0.5,            (0.1, 1.5)],
                 ["mv8",           0.5,            (0.1, 1.5)],
                 ["mv9",           0.5,            (0.1, 1.5)]]
+
+                # Fixed parameters
+#                ["BED_max",       1000.0,         [1000.0, 1000.0]],
+#                ["ICU_max",       1000.0,         [1000.0, 1000.0]]]
 
     nParams = size(params)[1]
     pNames = [params[i][1] for i in 1:nParams]
@@ -149,83 +156,82 @@ function allCountriesLoss(p)
     return totalLoss
 end
 
+function calculateSolution(country, params)
+
+    # First date should the date of the last death reported
+    startDate = first(countryData[country][:cases].time)
+    startDays = first(countryData[country][:cases].t)
+
+    # Final date should the date of the last death reported
+    endDate = last(countryData[country][:cases].time)
+    endDays = last(countryData[country][:cases].t)
+
+    tSpan = (startDays, endDays)
+
+    ## Country-specific constants
+    # Those are constants which cannot be changed to improve the model.
+
+    BED_max = countryData[country][:hospital_capacity]
+    ICU_max = countryData[country][:ICU_capacity]
+
+    Age_Pyramid = transpose( Matrix(countryData[country][:age_distribution]))
+    Age_Pyramid_frac = Age_Pyramid / sum(Age_Pyramid)
+
+    TotalConfirmedAtStart = @where(countryData[country][:cases], :time .== startDate)[!, :cases][1]
+    ConfirmedAtStart = TotalConfirmedAtStart .* Age_Pyramid_frac
+
+    TotalDeathsAtStart = @where(countryData[country][:cases], :time .== startDate)[!, :deaths][1]
+    DeathsAtStart = TotalDeathsAtStart .* Age_Pyramid_frac
 
 
+    # Deconstruct the parameters
+    r₀, tₗ, tᵢ, tₕ, tᵤ, γₑ, γᵢ, γⱼ, γₖ, δₖ, δₗ, δᵤ, infectedM, infectiousM,
+        mv0, mv1, mv2, mv3, mv4, mv5, mv6, mv7, mv8, mv9 = params
 
-function calculateSolution(country; params = countryData[country][:params][2])
+    mitigation = [(0, mv0), (7, mv1), (14, mv2), (21, mv3), (28, mv4),
+                  (35, mv5), (42, mv6), (49, mv7), (56, mv8), (63, mv9)]
 
-        # First date should the date of the last death reported
-        StartDate = first(countryData[country][:cases].time);
-        StartDays = date2days(StartDate);
+    ## Parameter vector
+    # Those are parameters which can be changed to improve the model
+    TotalInfected = infectedM * TotalConfirmedAtStart
+    InfectedAtStart = TotalInfected .* Age_Pyramid_frac
 
-        # Final date should the date of the last death reported
-        EndDate = last(countryData[country][:cases].time);
-        EndDays = date2days(EndDate);
+    TotalInfectious = infectiousM .* TotalConfirmedAtStart
+    InfectiousAtStart = TotalInfectious .* Age_Pyramid_frac
 
-        tSpan = (StartDays, EndDays);
-
-        ## Country-specific constants
-        # Those are constants which cannot be changed to improve the model.
-
-        BED_max = countryData[country][:hospital_capacity];
-        ICU_max = countryData[country][:ICU_capacity];
-
-        Age_Pyramid = transpose( Matrix(countryData[country][:age_distribution]));
-        Age_Pyramid_frac = Age_Pyramid / sum(Age_Pyramid);
-
-        TotalConfirmedAtStart = @where(countryData[country][:cases], :time .== StartDate)[!, :cases][1];
-        ConfirmedAtStart = TotalConfirmedAtStart .* Age_Pyramid_frac;
-
-        TotalDeathsAtStart = @where(countryData[country][:cases], :time .== StartDate)[!, :deaths][1];
-        DeathsAtStart = TotalDeathsAtStart .* Age_Pyramid_frac;
+    model_params = [r₀,
+                  tₗ, tᵢ, tₕ, tᵤ,
+                  γₑ, γᵢ, γⱼ, γₖ,
+                  δₖ, δₗ, δᵤ,
+                  mitigation,
+                  BED_max,
+                  ICU_max]
 
 
-        # Deconstruct the parameters
-        r₀, tₗ, tᵢ, tₕ, tᵤ, γₑ, γᵢ, γⱼ, γₖ, δₖ, δₗ, δᵤ, infectedM, infectiousM,
-            mv0, mv1, mv2, mv3, mv4, mv5, mv6, mv7, mv8, mv9 = params
+    ## Compartment vector
+    # Note that values are initialised at 1 to avoid division by zero
+    S0 = Age_Pyramid .- InfectedAtStart .- InfectiousAtStart .- DeathsAtStart
+    E0 = InfectedAtStart
+    I0 = InfectiousAtStart
+    J0 = ones(nAgeGroup)
+    H0 = ones(nAgeGroup)
+    C0 = ones(nAgeGroup)
+    R0 = ones(nAgeGroup)
+    D0 = DeathsAtStart
+    K0 = ones(nAgeGroup)
+    L0 = ones(nAgeGroup)
 
-        mitigation = [(0, mv0), (7, mv1), (14, mv2), (21, mv3), (28, mv4),
-                      (35, mv5), (42, mv6), (49, mv7), (56, mv8), (63, mv9)]
+    # Everybody confirmed is in hospital. Assume 1 ICU bed to stay away from zeros.
+    BED = [TotalInfectious]
+    ICU = [1.0]
 
-        ## Parameter vector
-        # Those are parameters which can be changed to improve the model
-        TotalInfected = infectedM * TotalConfirmedAtStart
-        InfectedAtStart = TotalInfected .* Age_Pyramid_frac;
+    P0 = vcat(S0, E0, I0, J0, H0, C0, R0, D0, K0, L0, BED, ICU)
 
-        TotalInfectious = infectiousM .* TotalConfirmedAtStart
-        InfectiousAtStart = TotalInfectious .* Age_Pyramid_frac;
+    # Differential equation solver
+    model = ODEProblem(epiDynamics!, P0, tSpan, model_params)
 
-        model_params = [r₀,
-                      tₗ, tᵢ, tₕ, tᵤ,
-                      γₑ, γᵢ, γⱼ, γₖ,
-                      δₖ, δₗ, δᵤ,
-                      mitigation]
+    # Note: progress steps might be too quick to see!
+    sol = solve(model, Tsit5(); progress = false)
 
-
-        ## Compartment vector
-        # Note that values are initialised at 1 to avoid division by zero
-        S0 = Age_Pyramid .- InfectedAtStart .- InfectiousAtStart .- DeathsAtStart
-        E0 = InfectedAtStart
-        I0 = InfectiousAtStart
-        J0 = ones(nAgeGroup)
-        H0 = ones(nAgeGroup)
-        C0 = ones(nAgeGroup)
-        R0 = ones(nAgeGroup)
-        D0 = DeathsAtStart
-        K0 = ones(nAgeGroup)
-        L0 = ones(nAgeGroup)
-
-        # Everybody confirmed is in hospital. Assume 1 ICU bed to stay away from zeros.
-        BED = [TotalInfectious]
-        ICU = [1.0];
-
-        P0 = vcat(S0, E0, I0, J0, H0, C0, R0, D0, K0, L0, BED, ICU);
-
-        # Differential equation solver
-        model = ODEProblem(epiDynamics!, P0, tSpan, model_params);
-
-        # Note: progress steps might be too quick to see!
-        sol = solve(model, Tsit5(); progress = false)
-
-        return sol
+    return sol
 end

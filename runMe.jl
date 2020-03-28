@@ -4,6 +4,8 @@ include("COVID-19-model.jl")
 include("COVID-19-run-model.jl")
 include("COVID-19-data.jl")
 
+using BlackBoxOptim
+
 # If running for the first time, or no updates for a long time
 # updateData()
 
@@ -23,9 +25,11 @@ countryData = Dict( c => populateCountryDate(c, h) for (c, h) in COUNTRY_LIST)
 #-- Find optimal parameters for every country
 #--
 for (c, _) in COUNTRY_LIST
+    global country = c
+
     # Determine optimal parameters - 15 seconds per country
-    result = bboptimize(deathsLoss, SearchRange = rangeParam, MaxTime = 15)
-    global countryData[c][:params] = best_candidate(result)
+    result = bboptimize(deathsLoss, SearchRange = countryData[country][:range], MaxTime = 15)
+    global countryData[country][:params] = best_candidate(result)
 end
 
 
@@ -37,10 +41,8 @@ country = "Spain"
 #--
 #-- Default parameters
 #--
-sol = calculateSolution(country)
+sol = calculateSolution(country, countryData[country][:params])
 calculateTotalDeaths(sol)
-
-
 
 
 #--------------------------------------------------------------------------------------------------
@@ -53,7 +55,7 @@ ioff();
 fig, ax = PyPlot.subplots();
 
 ax.plot(countryData[country][:cases].time,
-        calculateTotalDeaths(calculateSolution(country)),
+        calculateTotalDeaths(calculateSolution(country, countryData[country][:params])),
         label = "Forecast");
 
 ax.plot(countryData[country][:cases].time, countryData[country][:cases].deaths, "ro", label = "Actual", alpha = 0.3);
@@ -70,30 +72,8 @@ gcf()
 #--------------------------------------------------------------------------------------------------
 #-- Optimal parameters
 #--
-result = bboptimize(deathsLoss, SearchRange = rangeParam, MaxTime = 15)
+result = bboptimize(deathsLoss, SearchRange = countryData[country][:range], MaxTime = 15)
 countryData[country][:params] = best_candidate(result)
-
-
-#--------------------------------------------------------------------------------------------------
-#-- Plot optimal parameters
-#--
-pyplot();
-clf();
-ioff();
-
-fig, ax = PyPlot.subplots();
-
-ax.plot(countryData[country][:cases].time,
-                    calculateTotalDeaths(calculateSolution(country; params = countryData[country][:optimal])),
-                    label = "Forecast");
-ax.plot(countryData[country][:cases].time, countryData[country][:cases].deaths, "ro", label = "Actual", alpha = 0.3);
-
-ax.legend(loc="lower right");
-ax.set_xlabel("time");
-ax.set_ylabel("Individuals");
-ax.set_yscale("log");
-
-gcf()
 
 
 
@@ -125,7 +105,7 @@ for runs in 1:5
         p = countryData[c][:params]
 
         # Determine optimal parameters - 15 seconds per country
-        result = bboptimize(deathsLoss, SearchRange = rangeParam, MaxTime = 15)
+        result = bboptimize(deathsLoss, SearchRange = countryData[country][:range], MaxTime = 15)
         global countryData[c][:params] = (diseaseMask .* p) .+ (countryMask .* best_candidate(result))
     end
 end
@@ -133,6 +113,8 @@ end
 allParams = [countryData[c][:params] for (c, _) in COUNTRY_LIST]
 
 using Printf
+
+# Do what I say, not what I do
 Base.show(io::IO, f::Float64) = @printf io "%1.3f" f
 
 @show allParams

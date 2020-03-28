@@ -186,7 +186,7 @@ function epiDynamics!(dP, P, params, t)
     BED = BED[1]
     ICU = ICU[1]
 
-    r₀, tₗ, tᵢ, tₕ, tᵤ, γₑ, γᵢ, γⱼ, γₖ, δₖ, δₗ, δᵤ, mitigation = params
+    r₀, tₗ, tᵢ, tₕ, tᵤ, γₑ, γᵢ, γⱼ, γₖ, δₖ, δₗ, δᵤ, mitigation, BED_max, ICU_max = params
     # println(mitigation)
 
     ####################################
@@ -343,7 +343,7 @@ function calculateTotalDeaths(sol)
     # Make a linear approximation of the forecast to match the actual days
     start = date2days(first(countryData[country][:cases].time))
     finish = date2days(last(countryData[country][:cases].time))
-    
+
     return [ linearInterpolation(t, sol.t, forecastDeaths) for t in start:finish]
 end
 

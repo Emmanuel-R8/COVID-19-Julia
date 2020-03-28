@@ -5,8 +5,6 @@
 using CSV, Dates
 using DataFrames, DataFramesMeta
 
-include("COVID-19.jl")
-
 #-------------------------------------------------------------------------------------------------
 #--
 #-- DATA
