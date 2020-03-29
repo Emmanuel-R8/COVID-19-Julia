@@ -69,9 +69,9 @@ countryMask = ones(length(diseaseMask)) .- diseaseMask
 #--
 function freezeCountryRange()
     # List of parameters to freeze
-    listParams = ["γᵢ", "δᵤ",
+    listParams = ["γᵢ", "δᵤ", "mv0",                           # Always frozen
                   "infectedM", "infectiousM",
-                  "mv0", "mv1", "mv2", "mv3", "mv4",
+                  "mv1", "mv2", "mv3", "mv4",
                   "mv5", "mv6", "mv7", "mv8", "mv9"]
 
     # Get the names of the parameters
@@ -86,8 +86,8 @@ function freezeCountryRange()
 
             # If the name is to be relaxed (not in the list)
             if findfirst(pNames[position] .== listParams) == nothing
-                # Sets the range at the value +/- 10%
-                countryData[c][:range][position] = (value * (1-0.10), value * (1+0.10))
+                # Sets the range at the value +/- 20%
+                countryData[c][:range][position] = (value * (1-0.20), value * (1+0.20))
             else
                 # Otherwise, sets the optimisation range at that value
                 countryData[c][:range][position] = (value, value)
@@ -100,9 +100,10 @@ function freezeDiseaseRange()
 #-- This function is the same code as freezeCountryRange, but different list
 
     # List of parameters to freeze
-    listParams = ["r₀", "tₗ", "tᵢ", "tₕ", "tᵤ",
+    listParams = ["γᵢ", "δᵤ", "mv0",                             # Always frozen
+                  "r₀", "tₗ", "tᵢ", "tₕ", "tᵤ",
                   "γₑ", "γⱼ", "γₖ",
-                  "δₖ", "δₗ", ]
+                  "δₖ", "δₗ"]
 
     # Get the names of the parameters
     _, _, pNames = createDefaultParameters()
@@ -116,8 +117,8 @@ function freezeDiseaseRange()
 
             # If the name is to be relaxed (not in the list)
             if findfirst(pNames[position] .== listParams) == nothing
-                # Sets the range at the value +/- 10%
-                countryData[c][:range][position] = (value * (1-0.10), value * (1+0.10))
+                # Sets the range at the value +/- 20%
+                countryData[c][:range][position] = (value * (1-0.20), value * (1+0.20))
             else
                 # Otherwise, sets the optimisation range at that value
                 countryData[c][:range][position] = (value, value)
@@ -129,10 +130,11 @@ end
 
 
 function deathsLoss(p)
-    sol = calculateSolution(country, p)
+    # finalDate = nothig to force using only the time span of actual recorded deaths
+    sol = calculateSolution(country, p; finalDate = nothing)
 
     # Extract total deaths profile
-    forecastDeaths = calculateTotalDeaths(sol)
+    forecastDeaths = forecastOnActualDates(sol)
     #println(sum(forecastDeaths)); println();
 
     return sqrt(sum( (countryData[country][:cases].deaths .- forecastDeaths) .^ 2 ))
@@ -156,15 +158,20 @@ function allCountriesLoss(p)
     return totalLoss
 end
 
-function calculateSolution(country, params)
+function calculateSolution(country, params; finalDate = nothing)
 
     # First date should the date of the last death reported
     startDate = first(countryData[country][:cases].time)
     startDays = first(countryData[country][:cases].t)
 
     # Final date should the date of the last death reported
-    endDate = last(countryData[country][:cases].time)
-    endDays = last(countryData[country][:cases].t)
+    if finalDate == nothing
+        endDate = last(countryData[country][:cases].time)
+        endDays = last(countryData[country][:cases].t)
+    else
+        endDate = finalDate
+        endDays = date2days(finalDate)
+    end
 
     tSpan = (startDays, endDays)
 

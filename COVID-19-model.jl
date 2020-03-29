@@ -340,6 +340,14 @@ function calculateTotalDeaths(sol)
     # Select the rows of Dx and sums to have total deaths at each time period
     forecastDeaths = sum(solMat[D0Index:D0Index + nAgeGroup - 1, :]; dims=1)
 
+    return forecastDeaths[:]
+end
+
+function forecastOnActualDates(sol)
+
+    # Calculate the forecast total deaths
+    forecastDeaths = calculateTotalDeaths(sol)
+
     # Make a linear approximation of the forecast to match the actual days
     start = date2days(first(countryData[country][:cases].time))
     finish = date2days(last(countryData[country][:cases].time))
