@@ -4,6 +4,11 @@ library(rjson)
 library(tidyverse)
 library(lubridate)
 
+######################################################################################################
+##
+## Import from the Neherlab case_counts.json file
+##
+
 result <- fromJSON(file = "case_counts.json")
 
 res <- tibble(.rows = 0)
@@ -47,5 +52,10 @@ deaths10 <- deaths %>%
 write_csv(deaths, "deaths.csv")
 write_csv(deaths10, "deaths10.csv")
 
+
+######################################################################################################
+##
+## Import from the ECDC website
+##
 
 

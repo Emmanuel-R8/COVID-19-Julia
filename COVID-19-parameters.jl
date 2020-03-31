@@ -91,7 +91,7 @@ DISEASE_OPTIM = [DISEASE_BASE[i][5] for i in 1:DISEASE_N]
 
 COUNTRY_BASE =
          [  ["start",         0.0,            (-30.0, 30.0),     0,          5.0],
-            ["infectedM",     10.0,           (1.0, 100.0),      0,          10.0],
+            ["infectedM",     50.0,           (1.0, 100.0),      0,          10.0],
             ["infectiousM",   20.0,           (1.0, 50.0),       0,          10.0],
 
             # Mitigation profile with 4 points

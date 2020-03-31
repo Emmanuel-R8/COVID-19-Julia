@@ -17,8 +17,8 @@ function updateData()
     download(filename, "data/country_codes.csv")
 
     ### LIST OF CASES
-    filename = "https://github.com/neherlab/covid19_scenarios_data/raw/master/case-counts/World.tsv"
-    download(filename, "data/cases_world.tsv")
+    filename = "https://opendata.ecdc.europa.eu/covid19/casedistribution/csv"
+    download(filename, "data/ecdc.csv")
 
     ### ICU beds
     filename = "https://github.com/neherlab/covid19_scenarios_data/raw/master/hospital-data/ICU_capacity.tsv"
@@ -38,13 +38,7 @@ function loadData()
     country_codes = select(CSV.read("data/country_codes.csv"), :name, Symbol("alpha-3"))
 
     ### LIST OF CASES
-    cases = DataFrame(CSV.read("data/deaths10.tsv", delim = "\t", header = 4))
-
-    # Add a time column in the same format as the other dataframes
-    cases = hcat(DataFrame(t = date2days.(cases[:, :time])), cases)
-
-    # Remove any row with no recorded death
-    cases = cases[cases.deaths.>0, :]
+    ecdc = CSV.read("data/ecdc.csv")
 
     ### ICU beds
     ICU_capacity = select(CSV.read("data/ICU_capacity.tsv", delim = "\t"), :country, :CriticalCare)
@@ -67,7 +61,7 @@ function loadData()
     return Dict(
         :codes => country_codes,
         :popData => popData,
-        :cases => cases,
+        :cases => ecdc,
         :ICU => ICU_capacity,
         :Beds => hospital_capacity,
         :age_distribution => age_distribution,
@@ -76,7 +70,7 @@ function loadData()
 end
 
 # Let's get the Neherlab repo's data (the files can be updated with `updateData()`).
-COUNTRY_DB = loadData();
+COUNTRY_DB = loadData()
 
 #-------------------------------------------------------------------------------------------------
 #--
@@ -94,11 +88,30 @@ function populateCountryDate(country, hemisphere; useOptimised = true)
     countryData[:mitigation] = DEFAULT_MITIGATION
 
     # Clean up and extract country-specific information
-    country_codes = @where(COUNTRY_DB[:codes], occursin.(country, :name))
-    countryShort = country_codes[:, Symbol("alpha-3")][1]
+    country_codes = @where(COUNTRY_DB[:cases], occursin.(country, :countriesAndTerritories))
+    countryShort = country_codes[:, Symbol("countryterritoryCode")][1]
 
-    cases = @where(COUNTRY_DB[:cases], occursin.(country, :location))
-    sort!(cases, :time)
+
+    # Cases from the ECDC database
+    caseDB = COUNTRY_DB[:cases]
+
+    # select the right country
+    ecdc = @where(caseDB, occursin.(country, :countriesAndTerritories))
+
+    # Add a date comlumn in the Date type and convert to days
+    ecdc[!, :time] = Date.(ecdc.year, ecdc.month, ecdc.day)
+    ecdc[!, :t] = date2days.(ecdc.time)
+
+    # and order all dates in ascending order
+    ecdc = @orderby(ecdc, :time)
+
+    # Convert cases and deaths from daily deaths to cumulative amounts
+    ecdc.cases = cumsum(ecdc.cases)
+    ecdc.deaths = cumsum(ecdc.deaths)
+
+    # Only retain entries where there is a strictily positive number of deaths
+    ecdc = @where(ecdc, :deaths .> 0)
+
 
     population = @where(COUNTRY_DB[:popData], occursin.(country, :name))[!, :populationServed][1]
 
@@ -120,7 +133,7 @@ function populateCountryDate(country, hemisphere; useOptimised = true)
 
     countryData[:population] = population
     countryData[:country_code] = countryShort
-    countryData[:cases] = cases
+    countryData[:cases] = ecdc
     countryData[:ICU_capacity] = ICU_capacity
     countryData[:hospital_capacity] = hospital_capacity
     countryData[:age_distribution] = age_distribution

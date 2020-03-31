@@ -18,19 +18,21 @@ DiseaseParameters = DISEASE_INIT
 # If running for the first time, or no updates for a long time
 # updateData()
 
-COUNTRY_LIST = [
-    ("France",                      :north),
-    ("Italy",                       :north),
-    ("Spain",                       :north),
-    ("United Kingdom",              :north),
-    ("United States of America",    :north)]
+#------------------------------------------------------------------------------------------------
+
+#-- FOR DEBUGGING RUNS
+# COUNTRY_LIST = [
+#     ("France",                      :north),
+#     ("Italy",                       :north),
+#     ("Spain",                       :north),
+#     ("United Kingdom",              :north),
+#     ("United States of America",    :north)]
 
 COUNTRY_LIST = [
     ("Austria",                     :north),
     ("Belgium",                     :north),
     ("Bulgaria",                    :north),
     ("Canada",                      :north),
-    ("Czechia",                     :north),
     ("Denmark",                     :north),
     ("Finland",                     :north),
     ("France",                      :north),
@@ -43,8 +45,8 @@ COUNTRY_LIST = [
     ("Portugal",                    :north),
     ("Spain",                       :north),
     ("Sweden",                      :north),
-    ("United Kingdom",              :north),
-    ("United States of America",    :north)]
+    ("United_Kingdom",              :north),
+    ("United_States_of_America",    :north)]
 
 countryData = Dict( c => populateCountryDate(c, h, useOptimised = false) for (c, h) in COUNTRY_LIST)
 
@@ -64,7 +66,7 @@ Base.show(io::IO, f::Float64) = @printf(io, "%1.3f", f)
 
 # One run is optimising the disease, then optimising the countries.
 # Each run is 60 + 19*20 = about 5 minutes
-for run in 1:5
+for run in 1:10
 
     println("OPTIMISING COUNTRIES---------------------------")
     for (c1, _) in COUNTRY_LIST
@@ -77,7 +79,7 @@ for run in 1:5
         # Determine optimal parameters for each country
         result = bboptimize(countryData[c1][:lossFunction],
                             SearchRange = COUNTRY_RANGE,
-                            MaxTime = 20; TraceMode = :silent)
+                            MaxTime = 30; TraceMode = :silent)
 
         println(c1)
         print("Before                     "); @show p
@@ -93,7 +95,7 @@ for run in 1:5
 
     result = bboptimize(allCountriesLoss,
                         SearchRange = DISEASE_RANGE,
-                        MaxTime = 60; TraceMode = :silent)
+                        MaxTime = 30; TraceMode = :silent)
 
     print("Before     "); @show DiseaseParameters
     print("After "); @show best_candidate(result)
