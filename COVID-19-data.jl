@@ -38,7 +38,7 @@ function loadData()
     country_codes = select(CSV.read("data/country_codes.csv"), :name, Symbol("alpha-3"))
 
     ### LIST OF CASES
-    cases = DataFrame(CSV.read("data/cases_world.tsv", delim = "\t", header = 4))
+    cases = DataFrame(CSV.read("data/deaths10.tsv", delim = "\t", header = 4))
 
     # Add a time column in the same format as the other dataframes
     cases = hcat(DataFrame(t = date2days.(cases[:, :time])), cases)
@@ -61,6 +61,9 @@ function loadData()
     ### Age pyramids
     age_distribution = CSV.read("data/country_age_distribution.csv")
 
+    ### Last saved parameters
+    optimisedParameters = CSV.read("data/allCountryParameters.csv")
+
     return Dict(
         :codes => country_codes,
         :popData => popData,
@@ -68,6 +71,7 @@ function loadData()
         :ICU => ICU_capacity,
         :Beds => hospital_capacity,
         :age_distribution => age_distribution,
+        :optimisedParameters => optimisedParameters
     )
 end
 
@@ -78,12 +82,12 @@ COUNTRY_DB = loadData();
 #--
 #-- Create a dictionary populated with the information of a given country
 #--
-function populateCountryDate(country, hemisphere)
+function populateCountryDate(country, hemisphere; useOptimised = true)
 
     # This is the start of a country specific data structure. A dictionary is good enough for that purpose.
     countryData = Dict()
 
-    countryData = Dict([(:name, country), (:R₀, BaseR₀), (:hemisphere, hemisphere)])
+    countryData = Dict([(:name, country), (:hemisphere, hemisphere)])
 
     countryData[:peak] = peakDate[countryData[:hemisphere]]
     countryData[:ϵ] = ϵ[countryData[:hemisphere]]
@@ -96,10 +100,12 @@ function populateCountryDate(country, hemisphere)
     cases = @where(COUNTRY_DB[:cases], occursin.(country, :location))
     sort!(cases, :time)
 
+    population = @where(COUNTRY_DB[:popData], occursin.(country, :name))[!, :populationServed][1]
+
     ICU_capacity = try
         @where(COUNTRY_DB[:popData], occursin.(country, :name))[!, :ICUBeds][1]
     catch
-        0
+
     end
     ICU_capacity = convert(Float64, ICU_capacity)
 
@@ -112,15 +118,24 @@ function populateCountryDate(country, hemisphere)
 
     age_distribution = @where(COUNTRY_DB[:age_distribution], occursin.(country, :_key))[!, 2:10]
 
+    countryData[:population] = population
     countryData[:country_code] = countryShort
     countryData[:cases] = cases
     countryData[:ICU_capacity] = ICU_capacity
     countryData[:hospital_capacity] = hospital_capacity
     countryData[:age_distribution] = age_distribution
 
-    p, r = createDefaultParameters()
-    countryData[:params] = p
-    countryData[:range] = r
+    countryData[:params] = COUNTRY_INIT
+    countryData[:range] = COUNTRY_RANGE
+
+    countryData[:lossFunction] = p -> singleCountryLoss(country, p)
+
+    if useOptimised == true
+        p =  @where(COUNTRY_DB[:optimisedParameters], occursin.(country, :country))[:, 3:end]
+        if nrow(p) == 1
+            countryData[:params] =  convert(Array, p)
+        end
+    end
 
     return countryData
 end

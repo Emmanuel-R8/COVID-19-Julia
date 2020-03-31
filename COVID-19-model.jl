@@ -7,174 +7,6 @@ using DataFrames, DataFramesMeta
 using Plots, PyPlot
 using DifferentialEquations
 
-#-------------------------------------------------------------------------------------------------
-#--
-#-- Date functions
-#--
-# The time unit is days (as floating point)
-# Day 0 is taken at 1 March 2020
-const BASE_DATE = Date(2020, 3, 1)
-const BASE_DAYS = 0
-
-function date2days(d)
-    return convert(Float64, datetime2rata(d) - datetime2rata(BASE_DATE))
-end
-
-function days2date(d)
-    return BASE_DATE + Day(d)
-end
-
-#%% R₀ calculations
-# Default values for R_0
-const BaseR₀ = 2.7
-
-# Peak date
-const peakDate = Dict(
-    :north => date2days(Date(2020, 1, 1)),
-    :tropical => date2days(Date(2020, 1, 1)),    # although no impact
-    :south => date2days(Date(2020, 7, 1))
-)
-
-# Seasonal forcing parameter \epsilon
-const ϵ = Dict(:north => 0.2, :tropical => 0.0, :south => 0.2)
-
-# Gives R_0 at a given date
-function R₀(d; r₀ = baseR₀, latitude = :north)
-    eps = ϵ[latitude]
-    peak = peakDate[latitude]
-
-    return r₀ * (1 + eps * cos(2.0 * π * (d - peak) / 365.25))
-end
-
-#%% Epidemy mitigation
-const DEFAULT_MITIGATION = [(0, 1.00), (30, 0.80), (60, 0.5), (90, 0.20)]
-
-function getCurrentRatio(d; start = BASE_DAYS, schedule = DEFAULT_MITIGATION)
-    l = length(schedule)
-
-    # If l = 1, ratio will be the only one
-    if l == 1
-        return schedule[1][2]
-    else
-        for i in 2:l
-            d1 = schedule[i-1][1]
-            d2 = schedule[i  ][1]
-
-            if d < d2
-                deltaR = schedule[i][2] - schedule[i-1][2]
-                return schedule[i-1][2] + deltaR * (d - d1) / (d2 - d1)
-            end
-        end
-
-        # Last possible choice
-        return schedule[l][2]
-    end
-end
-
-
-#%% Commpartments
-# The population will be modeled as a single vector.
-# The vector will be a stack of several vectors, each of them represents a compartment.
-# Each compartment vector has a size $nAgeGroup$ representing each age group.
-# The compartments are: S, E, I, H, C, R, D, K, L
-# We also track the hospital bed usage BED and ICU
-
-# Population to compartments
-function Pop2Comp(P)
-
-    # To make copy/paste less prone to error
-    g = 0
-
-    S = P[ g*nAgeGroup + 1: (g+1)*nAgeGroup]; g += 1
-    E = P[ g*nAgeGroup + 1: (g+1)*nAgeGroup]; g += 1
-    I = P[ g*nAgeGroup + 1: (g+1)*nAgeGroup]; g += 1
-    J = P[ g*nAgeGroup + 1: (g+1)*nAgeGroup]; g += 1
-    H = P[ g*nAgeGroup + 1: (g+1)*nAgeGroup]; g += 1
-    C = P[ g*nAgeGroup + 1: (g+1)*nAgeGroup]; g += 1
-    R = P[ g*nAgeGroup + 1: (g+1)*nAgeGroup]; g += 1
-    D = P[ g*nAgeGroup + 1: (g+1)*nAgeGroup]; g += 1
-    K = P[ g*nAgeGroup + 1: (g+1)*nAgeGroup]; g += 1
-    L = P[ g*nAgeGroup + 1: (g+1)*nAgeGroup]; g += 1
-
-    h = 1
-    BED = P[ g*nAgeGroup + h: g*nAgeGroup + h]; h += 1
-    ICU = P[ g*nAgeGroup + h: g*nAgeGroup + h]; h += 1
-
-    return S, E, I, J, H, C, R, D, K, L, BED, ICU
-end
-
-
-#-------------------------------------------------------------------------------------------------
-#--
-#-- EPIDEMIOLOGY
-#-
-
-#-- Susceptibility to contagion and transition from a compartment to another
-const AgeGroup = ["0-9", "10-19", "20-29", "30-39", "40-49", "50-59", "60-69", "70-79", "80+"]
-const zₐ =       [0.05,   0.05,   0.10,    0.15,    0.20,    0.25,    0.30,    0.40,    0.50]
-const mₐ =       [0.01,   0.03,   0.03,    0.03,    0.06,    0.10,    0.25,    0.35,    0.50]
-const cₐ =       [0.05,   0.10,   0.10,    0.15,    0.20,    0.25,    0.35,    0.45,    0.55]
-const fₐ =       [0.30,   0.30,   0.30,    0.30,    0.30,    0.40,    0.40,    0.50,    0.50]
-
-const nAgeGroup = length(AgeGroup)
-
-#-- Contagion multiplier
-# asymptomatic individuals (compartment E)
-const γₑ = 0.50
-
-# Infected / symptomatic individuals
-const γᵢ=1.0
-
-# Severe symptoms
-const γⱼ=1.0
-
-# Critical symptoms
-const γₖ = 2.0
-
-#-- Fatality Multiplier
-# In ICU
-const δᵤ = 1.0
-
-# In hospital
-const δₗ = 2.0
-
-# Out of hospital
-const δₖ = 3.0
-
-#-- Transition times (all in days)
-# Time to infectiousness (written t\_l)
-const tₗ = 5.0
-
-# Time to infectiousness (written t\_i)
-const tᵢ = 3.0
-
-# Time in hospital bed (not ICU)
-const tₕ = 4.0
-
-# Time in ICU
-const tᵤ = 14.0
-
-
-
-#-------------------------------------------------------------------------------------------------
-#--
-#-- MODELLING
-#--
-
-const compartments =  ["S", "E", "I", "J", "H", "C", "R", "D", "K", "L"];
-
-# How many compartments before D in the list of solution
-const nb4D = findfirst(compartments .== "D") - 1
-
-# index of D0
-const D0Index = nb4D * nAgeGroup + 1
-
-
-# Helper function to never change the number of individuals in a compartment in a way that would
-# make it below 0.1 (to avoid rounding errors around 0)
-function ensurePositive(d,s)
-    return max.(d .+ s, 0.1) .- s
-end
 
 # The dynamics of the epidemy is a function that mutates its argument with a precise signature
 # Don't pay too much attetion to the print debugs/
@@ -186,7 +18,8 @@ function epiDynamics!(dP, P, params, t)
     BED = BED[1]
     ICU = ICU[1]
 
-    r₀, tₗ, tᵢ, tₕ, tᵤ, γₑ, γᵢ, γⱼ, γₖ, δₖ, δₗ, δᵤ, mitigation, BED_max, ICU_max = params
+    r₀, tₗ, tᵢ, tₕ, tᵤ, γₑ, γᵢ, γⱼ, γₖ, δₖ, δₗ, δᵤ , mitigation, BED_max, ICU_max = params
+
     # println(mitigation)
 
     ####################################
@@ -316,7 +149,6 @@ function epiDynamics!(dP, P, params, t)
 end
 
 
-
 function errorDeaths(actualD, predictedD)
     return sqrt(sum( (actualD .- predictedD) .^ 2 ))
 end
@@ -329,13 +161,14 @@ function calculateTotalDeaths(sol)
     nSteps = length(sol.t);
     nVars  = length(sol.u[1]);
 
-    solMat = zeros((nSteps, nVars));
-    for i = 1:nSteps
-        solMat[i, :] = sol.u[i]
-    end;
-
-    # Creates matrix (varialbles x time steps)
-    solMat = transpose(solMat)
+    # solMat = zeros((nSteps, nVars));
+    # for i = 1:nSteps
+    #     solMat[i, :] = sol.u[i]
+    # end;
+    #
+    # # Creates matrix (varialbles x time steps)
+    # solMat = transpose(solMat)
+    solMat = reduce(hcat, sol.u)
 
     # Select the rows of Dx and sums to have total deaths at each time period
     forecastDeaths = sum(solMat[D0Index:D0Index + nAgeGroup - 1, :]; dims=1)
@@ -343,16 +176,25 @@ function calculateTotalDeaths(sol)
     return forecastDeaths[:]
 end
 
-function forecastOnActualDates(sol)
+function forecastOnActualDates(sol, country)
 
     # Calculate the forecast total deaths
     forecastDeaths = calculateTotalDeaths(sol)
 
+    # What is the starting date of the model
+    position = (findfirst("start" .== COUNTRY_NAMES))
+    startDate = ceil(countryData[country][:params][position])
+
     # Make a linear approximation of the forecast to match the actual days
-    start = date2days(first(countryData[country][:cases].time))
+    start = max(date2days(first(countryData[country][:cases].time)), startDate)
     finish = date2days(last(countryData[country][:cases].time))
 
-    return [ linearInterpolation(t, sol.t, forecastDeaths) for t in start:finish]
+    relevantCases =  @linq countryData[country][:cases] |> where(:t .>= start) |> select(:deaths)
+    relevantCases = convert(Array, relevantCases)
+
+    return [[ t                                             for t in start:finish],
+            relevantCases,
+            [ linearInterpolation(t, sol.t, forecastDeaths) for t in start:finish]]
 end
 
 function my_loss_function(sol)
