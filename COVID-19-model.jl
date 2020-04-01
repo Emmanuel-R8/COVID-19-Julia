@@ -177,24 +177,44 @@ function calculateTotalDeaths(sol)
 end
 
 function forecastOnActualDates(sol, country)
+    # Calculate the total deaths forecast by the model on the dates for which there is an actual
+    # record (ie on the days of :cases dataframe)
 
-    # Calculate the forecast total deaths
+    # The model always starts at time 0 to deals with the mitigation ratio (which starts at 0) and
+    # assumes 5 deaths at that date.
+    # The 'modelStart' parameter deals with shifting the model compared to the actual record to go
+    # from 'model time' to 'real time'
+
+    # Generate the forecast deaths on the dates of the model (in model time)
     forecastDeaths = calculateTotalDeaths(sol)
 
-    # What is the starting date of the model
-    position = (findfirst("start" .== COUNTRY_NAMES))
-    startDate = ceil(countryData[country][:params][position])
+
+    # Get the modelStart parameter
+    position = findfirst("modelStart" .== COUNTRY_NAMES)
+    modelStart = countryData[country][:params][position]
+
+    # Get the start and final dates of the deaths record (in real time)
+    start = date2days(first(countryData[country][:cases].time))
+    final = date2days(last(countryData[country][:cases].time))
+
+    # Translates the dates into model time
+    start = start - modelStart
+    final = final - modelStart
+
+    # Ensures that those dates are positive (since the model starts at t = 0)
+    start = max(0.0, start)
+    final = max(0.0, final)
 
     # Make a linear approximation of the forecast to match the actual days
-    start = max(date2days(first(countryData[country][:cases].time)), startDate)
-    finish = date2days(last(countryData[country][:cases].time))
+    forecast = [ linearInterpolation(t, sol.t, forecastDeaths) for t in start:final]
 
-    relevantCases =  @linq countryData[country][:cases] |> where(:t .>= start) |> select(:deaths)
+    # Select the actual deaths record on those dates
+    relevantCases =  @linq countryData[country][:cases] |> where(:t .>= start + modelStart) |> select(:deaths)
     relevantCases = convert(Array, relevantCases)
 
-    return [[ t                                             for t in start:finish],
+    return [[ t for t in start:final],
             relevantCases,
-            [ linearInterpolation(t, sol.t, forecastDeaths) for t in start:finish]]
+            forecast]
 end
 
 function my_loss_function(sol)

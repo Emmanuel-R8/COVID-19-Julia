@@ -87,16 +87,12 @@ function populateCountryDate(country, hemisphere; useOptimised = true)
     countryData[:ϵ] = ϵ[countryData[:hemisphere]]
     countryData[:mitigation] = DEFAULT_MITIGATION
 
-    # Clean up and extract country-specific information
-    country_codes = @where(COUNTRY_DB[:cases], occursin.(country, :countriesAndTerritories))
-    countryShort = country_codes[:, Symbol("countryterritoryCode")][1]
-
 
     # Cases from the ECDC database
     caseDB = COUNTRY_DB[:cases]
 
     # select the right country
-    ecdc = @where(caseDB, occursin.(country, :countriesAndTerritories))
+    ecdc = @where(caseDB, country .== :countriesAndTerritories)
 
     # Add a date comlumn in the Date type and convert to days
     ecdc[!, :time] = Date.(ecdc.year, ecdc.month, ecdc.day)
@@ -113,23 +109,26 @@ function populateCountryDate(country, hemisphere; useOptimised = true)
     ecdc = @where(ecdc, :deaths .> 0)
 
 
-    population = @where(COUNTRY_DB[:popData], occursin.(country, :name))[!, :populationServed][1]
+    # Extract country-specific information
+    countryShort = ecdc[1, :countryterritoryCode]
+
+    population = ecdc[1, :popData2018]
 
     ICU_capacity = try
         @where(COUNTRY_DB[:popData], occursin.(country, :name))[!, :ICUBeds][1]
     catch
-
+        population / 10.0
     end
     ICU_capacity = convert(Float64, ICU_capacity)
 
     hospital_capacity = try
         @where(COUNTRY_DB[:popData], occursin.(country, :name))[!, :hospitalBeds][1]
     catch
-        0
+        population / 100.0
     end
     hospital_capacity = convert(Float64, hospital_capacity)
 
-    age_distribution = @where(COUNTRY_DB[:age_distribution], occursin.(country, :_key))[!, 2:10]
+    age_distribution = @where(COUNTRY_DB[:age_distribution], occursin.(country, :_key))[1, 2:10]
 
     countryData[:population] = population
     countryData[:country_code] = countryShort

@@ -52,7 +52,7 @@ const δₖ = 3.0
 
 #-- Transition times (all in days)
 # Time to infectiousness (written t\_l)
-const tₗ = 5.0
+const tₗ = 4.0
 
 # Time to infectiousness (written t\_i)
 const tᵢ = 3.0
@@ -69,11 +69,11 @@ const tᵤ = 14.0
 #            Name             Base value      Allowed range      Disease     +/- for optim
 #                                                                specific?
 DISEASE_BASE =
-         [  ["r₀",            BaseR₀,         (1.0, 5.0),        1,          1.0],
-            ["tₗ",            tₗ,             (3.0, 6.0),        1,          1.0],
-            ["tᵢ",            tᵢ,             (3.0, 6.0),        1,          1.0],
-            ["tₕ",            tₕ,             (4.0, 4.0),        1,          1.0],
-            ["tᵤ",            tᵤ,             (12.0, 17.0),      1,          2.0],
+         [  ["r₀",            BaseR₀,         (2.0, 3.5),        1,          1.0],
+            ["tₗ",            tₗ,             (2.0, 8.0),       1,          1.0],
+            ["tᵢ",            tᵢ,             (2.0, 8.0),       1,          1.0],
+            ["tₕ",            tₕ,             (2.0, 8.0),       1,          1.0],
+            ["tᵤ",            tᵤ,             (2.0, 25.0),       1,          2.0],
             ["γₑ",            γₑ,             (0.2, 2.0),        1,          0.3],
             ["γᵢ",            γᵢ,             (1.0, 1.0),        1,          0.0],
             ["γⱼ",            γⱼ,             (0.2, 4.0),        1,          1.0],
@@ -90,9 +90,9 @@ DISEASE_OPTIM = [DISEASE_BASE[i][5] for i in 1:DISEASE_N]
 
 
 COUNTRY_BASE =
-         [  ["start",         0.0,            (-30.0, 30.0),     0,          5.0],
-            ["infectedM",     50.0,           (1.0, 100.0),      0,          10.0],
-            ["infectiousM",   20.0,           (1.0, 50.0),       0,          10.0],
+         [  ["modelStart",    0.0,            (-60.0, 30.0),     0,          5.0],
+            ["infectedM",     50.0,           (1.0, 1000.0),     0,          10.0],
+            ["infectiousM",   20.0,           (1.0, 500.0),      0,          10.0],
 
             # Mitigation profile with 4 points
             ["mv0",           1.0,            (1.0, 1.0),        0,          0.0],
@@ -114,7 +114,7 @@ COUNTRY_OPTIM = [COUNTRY_BASE[i][5] for i in 1:COUNTRY_N]
 
 #-------------------------------------------------------------------------------------------------
 #--
-#-- Define masks indicating variables relating to the disease and to the countries
+#-- Define asks indicating variables relating to the disease and to the countries
 #-- Note that 2 variables are never optimised to provide an anchor for the others
 #-- They are the infectiousness of a symptomatic individual γᵢ and the fatality rate from ICU δᵤ
 #--

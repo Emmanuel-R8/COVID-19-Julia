@@ -54,7 +54,8 @@ function R₀(d; r₀ = baseR₀, latitude = :north)
 end
 
 #%% Epidemy mitigation
-const DEFAULT_MITIGATION = [(0, 1.00), (30, 0.80), (60, 0.5), (90, 0.20)]
+const DEFAULT_MITIGATION = [(0, 1.0),  (7, 0.8), (14, 0.5), (21, 0.5), (28, 0.5),
+                            (35, 0.5), (42, 0.5), (49, 0.5), (56, 0.5), (63, 0.5)]
 
 function getCurrentRatio(d; start = BASE_DAYS, schedule = DEFAULT_MITIGATION)
     l = length(schedule)
@@ -120,10 +121,13 @@ end
 
 
 function plotCountriestoDisk(suffix)
-
     #--------------------------------------------------------------------------------------------------
     #-- Plot
     #--
+
+    # Get the modelStart parameter
+    position = findfirst("modelStart" .== COUNTRY_NAMES)
+
     for (c, _) in COUNTRY_LIST
         global country = c
 
@@ -135,11 +139,15 @@ function plotCountriestoDisk(suffix)
                                 countryData[country][:params];
                                 finalDate = Date(2020, 6, 1))
 
+        # print(country); print(" "); println(countryData[country][:params][position])
+
         ax.plot(sol.t,
                 calculateTotalDeaths(sol),
                 label = "Forecast");
-        ax.plot(countryData[country][:cases].t,
+
+        ax.plot(countryData[country][:cases][:t],
                 countryData[country][:cases].deaths, "ro", label = "Actual", alpha = 0.3);
+
         ax.legend(loc="lower right");
         ax.set_title(country);
         ax.set_xlabel("time");
@@ -148,4 +156,9 @@ function plotCountriestoDisk(suffix)
 
         PyPlot.savefig("images/country_" * country * "_" * suffix * ".png");
     end
+end
+
+
+function allSingleLosses()
+    [(c, singleCountryLoss(c, countryData[c][:params])) for (c, _) in COUNTRY_LIST]
 end

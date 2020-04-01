@@ -69,7 +69,7 @@ function singleCountryLoss(country, countryparams)
     # Extract total deaths profile
     forecastDeaths = forecastOnActualDates(sol, country)
 
-    return sqrt(sum((forecastDeaths[2] .- forecastDeaths[3]) .^ 2 ))
+    return sqrt(sum((forecastDeaths[2] .- forecastDeaths[3]) .^ 2 )) / length(forecastDeaths[2])
 end
 
 
@@ -90,12 +90,18 @@ function allCountriesLoss(diseaseparams)
 
         # Extract total deaths profile
         forecastDeaths = forecastOnActualDates(sol, country)
-        loss =  sqrt(sum((forecastDeaths[2] .- forecastDeaths[3]) .^ 2 ))
 
-        totalLoss += loss * 1000000.0 / countryData[country][:population]
+        # Prepare the value to never be negative, then add 1 (to avoid log errors)
+        actual   = max.(forecastDeaths[2], 0.0) .+ 1.0
+        forecast = max.(forecastDeaths[3], 0.0) .+ 1.0
+
+        loss =  sum( (log.(actual) .- log.(forecast)).^ 2 ) / length(actual)
+        # loss =  sqrt(sum( (actual .- forecast).^ 2 ))
+
+        totalLoss += loss
     end
 
-    return totalLoss
+    return sqrt(totalLoss)
 end
 
 
@@ -104,7 +110,7 @@ function calculateSolution(country, diseaseparams, countryparams; finalDate = no
 
     # Deconstruct the parameters
     r₀, tₗ, tᵢ, tₕ, tᵤ, γₑ, γᵢ, γⱼ, γₖ, δₖ, δₗ, δᵤ = diseaseparams
-    shiftStart, infectedM, infectiousM, mv0, mv1, mv2, mv3, mv4, mv5, mv6, mv7, mv8, mv9 = countryparams
+    modelStart, infectedM, infectiousM, mv0, mv1, mv2, mv3, mv4, mv5, mv6, mv7, mv8, mv9 = countryparams
 
     mitigation = [(0, mv0), (7, mv1), (14, mv2), (21, mv3), (28, mv4),
                   (35, mv5), (42, mv6), (49, mv7), (56, mv8), (63, mv9)]
@@ -114,7 +120,7 @@ function calculateSolution(country, diseaseparams, countryparams; finalDate = no
     startDate = first(countryData[country][:cases].time)
 
     # Then the start of the model is shifted around the first death
-    startDays = first(countryData[country][:cases].t) + shiftStart
+    startDays = modelStart
 
     # Final date should the date of the last death reported unless given
     if finalDate == nothing
@@ -133,8 +139,8 @@ function calculateSolution(country, diseaseparams, countryparams; finalDate = no
     BED_max = countryData[country][:hospital_capacity]
     ICU_max = countryData[country][:ICU_capacity]
 
-    Age_Pyramid = transpose( Matrix(countryData[country][:age_distribution]))
-    Age_Pyramid_frac = Age_Pyramid / sum(Age_Pyramid)
+    Age_Pyramid = Array(countryData[country][:age_distribution])
+    Age_Pyramid_frac = Age_Pyramid ./ sum(Age_Pyramid)
 
     #TotalConfirmedAtStart = @where(countryData[country][:cases], :time .== startDate)[!, :cases][1]
     #ConfirmedAtStart = TotalConfirmedAtStart .* Age_Pyramid_frac
@@ -187,4 +193,32 @@ function calculateSolution(country, diseaseparams, countryparams; finalDate = no
     sol = solve(model, Tsit5(); progress = false)
 
     return sol
+end
+
+
+function updateEpidemiologyOnce(;maxtime = 60)
+    # Optimise the epidemiology
+    println("OPTIMISING EPIDEMIOLOGY---------------------------")
+
+    result = bboptimize(allCountriesLoss,
+                        SearchRange = DISEASE_RANGE,
+                        MaxTime = maxtime; TraceMode = :compact)
+
+    best_candidate(result)
+    global DiseaseParameters = best_candidate(result)
+end
+
+function updateCountryOnce(country; maxtime = 60)
+    # Make a note of the disease parameters
+    p = countryData[country][:params]
+
+    # Determine optimal parameters for each countryw
+    result = bboptimize(countryData[country][:lossFunction],
+                        SearchRange = COUNTRY_RANGE,
+                        MaxTime = 30; TraceMode = :compact)
+    println(country)
+    print("Before                     "); @show p
+    print("After "); @show best_candidate(result)
+    println();
+    global countryData[country][:params] = best_candidate(result)
 end

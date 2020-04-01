@@ -58,4 +58,14 @@ write_csv(deaths10, "deaths10.csv")
 ## Import from the ECDC website
 ##
 
+ecdc <- read.csv("ecdc.csv")
+ecdc <- as_tibble(ecdc)
 
+ecdc_sum <- ecdc %>% group_by(countriesAndTerritories) %>%
+  mutate(deaths = cumsum(deaths),
+         cases = cumsum(deaths)) %>%
+  ungroup() %>%
+  filter(deaths > 0)
+
+ecdc_sum %>% group_by(countriesAndTerritories) %>%
+  summarise(n = n(), max = max(deaths)) %>% arrange(max) %>% view()
