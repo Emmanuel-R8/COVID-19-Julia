@@ -77,14 +77,7 @@ function fullEpidemyLoss(params)
         # Extract total deaths profile
         forecastDeaths = forecastOnActualDates(sol, country)
 
-        # Prepare the value to never be negative, then add 1 (to avoid log errors)
-        actual   = max.(forecastDeaths[2], 0.0) .+ 1.0
-        forecast = max.(forecastDeaths[3], 0.0) .+ 1.0
-
-        loss =  sum( (log.(actual) .- log.(forecast)).^ 2 ) / length(actual)
-        # loss =  sqrt(sum( (actual .- forecast).^ 2 ))
-
-        totalLoss += loss
+        totalLoss += forecastError(forecastDeaths[2], forecastDeaths[3])
     end
 
     return sqrt(totalLoss)
@@ -117,4 +110,29 @@ function updateCountryOnce(country; maxtime = 60)
     print("After "); @show best_candidate(result)
     println();
     global countryData[country][:params] = best_candidate(result)
+end
+
+
+function updateCountriesAll(params)
+
+    totalLoss = 0.0
+
+    # Then each country for which the loss is immediately calculated
+    for n in 1:COUNTRY_LIST_N
+        country, _ = COUNTRY_LIST[n]
+
+        country_start_index = (n - 1) * COUNTRY_N + 1
+        country_final_index = (n - 1) * COUNTRY_N + COUNTRY_N
+        countryparams = params[country_start_index:country_final_index]
+
+        # finalDate = nothig to force using only the time span of actual recorded deaths
+        sol = calculateSolution(country, DiseaseParameters, countryparams; finalDate = nothing)
+
+        # Extract total deaths profile
+        forecastDeaths = forecastOnActualDates(sol, country)
+
+        totalLoss += forecastError(forecastDeaths[2], forecastDeaths[3])
+    end
+
+    return sqrt(totalLoss)
 end
