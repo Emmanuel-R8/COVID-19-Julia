@@ -1,9 +1,9 @@
 # The [Neherlab COVID-19](https://neherlab.org/covid19/) forecast model
 
 # Runs with 4 processes (if 4 cores CPU) - Only for optimised libraries
-using Distributed
-TOTAL_PROCS = 4
-Distributed.addprocs(TOTAL_PROCS - Distributed.nprocs())
+#using Distributed
+#TOTAL_PROCS = 4
+#Distributed.addprocs(TOTAL_PROCS - Distributed.nprocs())
 
 include("COVID-19-parameters.jl")
 include("COVID-19-utils.jl")
@@ -38,21 +38,16 @@ COUNTRY_LIST = [
     ("Canada",                      :north),
     ("China",                       :north),
     ("Denmark",                     :north),
-    ("Finland",                     :north),
     ("France",                      :north),
     ("Germany",                     :north),
     ("Greece",                      :north),
-    ("Hungary",                     :north),
-    ("Japan",                       :north),
     ("India",                       :north),
     ("Iran",                        :north),
-    ("Italy",                        :north),
+    ("Italy",                       :north),
     ("Japan",                       :north),
     ("Netherlands",                 :north),
     ("Norway",                      :north),
     ("Poland",                      :north),
-    ("Portugal",                    :north),
-    ("Singapore",                   :north),
     ("Spain",                       :north),
     ("Sweden",                      :north),
     ("United_Kingdom",              :north),
@@ -63,7 +58,7 @@ COUNTRY_LIST_N = length(COUNTRY_LIST)
 countryData = Dict( c => populateCountryDate(c, h, useOptimised = false) for (c, h) in COUNTRY_LIST)
 
 # Update countryData[] if the COUNTRY_LIST is updated at some intermediate step
-print("Populating: ")
+println("Populating: ")
 for (c, h) in COUNTRY_LIST
     global countryData
     if haskey(countryData, c) == false
@@ -73,7 +68,8 @@ for (c, h) in COUNTRY_LIST
 end
 println()
 
-plotCountriestoDisk("beforeOptim")
+plotCountriestoDisk("__beforeOptim")
+saveParameters()
 
 #-------------------------------------------------------------------------------------------------
 #--
@@ -84,6 +80,8 @@ plotCountriestoDisk("beforeOptim")
 using Printf
 Base.show(io::IO, f::Float64) = @printf(io, "%1.3f", f)
 
+
+
 # First run to optimise the counties
 println("OPTIMISING COUNTRIES---------------------------")
 for (c1, _) in COUNTRY_LIST
@@ -91,91 +89,85 @@ for (c1, _) in COUNTRY_LIST
 
     # Make a note of the disease parameters
     p = countryData[c1][:params]
+    println(c1)
+    print("Before                     "); @show p
+
+    countryRange = COUNTRY_RANGE
+    countryRange[COUNTRY_PARAM_START] = approximateModelStartRange(c1)
 
     # Determine optimal parameters for each countryw
     result = bboptimize(countryData[c1][:lossFunction],
-                        SearchRange = COUNTRY_RANGE,
+                        SearchRange = countryRange,
                         MaxTime = 30; TraceMode = :silent)
 
-    println(c1)
-    print("Before                     "); @show p
     print("After "); @show best_candidate(result)
     println();
 
     countryData[c1][:params] = best_candidate(result)
 end
 
+plotVignette()
+saveParameters()
+plotCountriestoDisk(repr(now()))
 
-plotCountriestoDisk("Optim1")
+#-------------------------------------------------------------------------------------------------
+# Update Epidemiology
+updateEpidemiologyOnce()
+plotVignette()
+saveParameters()
+plotCountriestoDisk(repr(now()))
 
+
+#-------------------------------------------------------------------------------------------------
 # Normal runs: Optimise country, then disease after each country
 for run in 1:1
-
-    println(); println("OPTIMISING COUNTRIES---------------------------")
-    for (c1, _) in COUNTRY_LIST
+    println(); println("OPTIMISING 5 WORST COUNTRIES ERRORS---------------------------")
+    scores = allSingleLosses(sorted = true)
+    @show scores
+    for c1 in first(scores, 5)[:, 2]
         global countryData
 
         # Make a note of the disease parameters
         p = countryData[c1][:params]
-
-        # Determine optimal parameters for each countryw
-        result = bboptimize(countryData[c1][:lossFunction],
-                            SearchRange = COUNTRY_RANGE,
-                            MaxTime = 30; TraceMode = :silent)
-
         print(c1); println("-----------------------------")
         print("Before                     "); @show p
+
+        # Determine optimal parameters for each countryw
+        countryRange = COUNTRY_RANGE
+        countryRange[COUNTRY_PARAM_START] = approximateModelStartRange(c1)
+
+        result = bboptimize(countryData[c1][:lossFunction],
+                            SearchRange = countryRange,
+                            MaxTime = 20; TraceMode = :silent)
+
         print("After "); @show best_candidate(result)
 
         countryData[c1][:params] = best_candidate(result)
-
-
-        # Optimise the epidemiology
-        println("OPTIMISING EPIDEMIOLOGY----")
-        # Optimise across all countries (using "France" just to have disease parameters to optimise)
-
-        result = bboptimize(allCountriesLoss,
-                            SearchRange = DISEASE_RANGE,
-                            MaxTime = 20; TraceMode = :silent)
-
-        print("Before     "); @show DiseaseParameters
-        print("After "); @show best_candidate(result)
-        println()
-
-        global DiseaseParameters = best_candidate(result)
-
-        println()
     end
 
     # After having done all the countries, epidemiology again more seriously
     println("OPTIMISING EPIDEMIOLOGY---------------------------")
-    # Optimise across all countries (using "France" just to have disease parameters to optimise)
-
-    result = bboptimize(allCountriesLoss,
-                        SearchRange = DISEASE_RANGE,
-                        MaxTime = 120; TraceMode = :silent)
+    # Optimise across all countries (using "France" just to have disease parameters to optimise)q
 
     print("Before     "); @show DiseaseParameters
+    result = bboptimize(allCountriesLoss,
+                        SearchRange = DISEASE_RANGE,
+                        MaxTime = 20; TraceMode = :silent)
+
     print("After "); @show best_candidate(result)
     println()
 
     global DiseaseParameters = best_candidate(result)
 
+    saveParameters()
+    plotCountriestoDisk(repr(now()))
+
     println()
 end
 
-plotCountriestoDisk("Optim5")
-
-allCountryNames = DataFrame(country = [countryData[c][:name] for (c, _) in COUNTRY_LIST])
-allCountryStartDates = DataFrame(startDate = [first(countryData[c][:cases].time) for (c, _) in COUNTRY_LIST])
-
-allCountryParams = [countryData[c][:params] for (c, _) in COUNTRY_LIST]
-allCountryParams = DataFrame(transpose(reduce(hcat, allCountryParams)))
-rename!(allCountryParams, COUNTRY_NAMES)
-
-allCountryParams = hcat(allCountryNames, allCountryStartDates, allCountryParams)
-
-CSV.write("data/allCountryParameters_2020_04_01_16_51.csv", allCountryParams)
+plotVignette()
+plotCountriestoDisk(repr(now()))
+saveParameters()
 
 allDiseaseParameters = DiseaseParameters
 rename!(allDiseaseParameters, DISEASE_NAMES)

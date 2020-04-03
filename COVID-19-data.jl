@@ -56,7 +56,11 @@ function loadData()
     age_distribution = CSV.read("data/country_age_distribution.csv")
 
     ### Last saved parameters
-    optimisedParameters = CSV.read("data/allCountryParameters.csv")
+    optimisedParameters = try
+        CSV.read("data/allCountryParameters.csv")
+    catch
+        nothing
+    end
 
     return Dict(
         :codes => country_codes,
@@ -108,7 +112,6 @@ function populateCountryDate(country, hemisphere; useOptimised = true)
     # Only retain entries where there is a strictily positive number of deaths
     ecdc = @where(ecdc, :deaths .> 0)
 
-
     # Extract country-specific information
     countryShort = ecdc[1, :countryterritoryCode]
 
@@ -150,4 +153,26 @@ function populateCountryDate(country, hemisphere; useOptimised = true)
     end
 
     return countryData
+end
+
+
+#--------------------------------------------------------------------------------------------------
+#--
+#-- Find the date at which cases exceed 5 for a given country
+#--
+function approximateModelStartRange(country::String)
+    # Estimates when deaths number is about DEATH_AT_MODEL_START
+    above = @where(countryData[country][:cases], :deaths .> DEATH_AT_MODEL_START)
+
+    # Take first date
+    if nrow(above) > 0
+        first_date_above = first(above[:, :time])
+    else
+        first_date_above = BASE_DATE
+    end
+
+    # Convert to day
+    above_day = date2days(first_date_above)
+
+    return(above_day - 7.0, above_day + 7.0)
 end

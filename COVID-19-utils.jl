@@ -2,41 +2,74 @@ using Dates
 
 #-------------------------------------------------------------------------------------------------
 #--
-#-- Linear interpolation of Y values for a new set of X values.
+#-- Linear interpolation of the Y value at point x depending on where it falls in/around X.
 #--
 function linearInterpolation(x, xvar, yvar)
     l = length(xvar)
 
-    # If l = 1, ratio will be the only one
-    if l == 1
+    # if x is before the very first point, return the first Y
+    # if  the list only has one point, same result
+    if (x <= xvar[1]) | (l == 1)
         return yvar[1]
-    else
-        for i in 2:l
-            x1 = xvar[i-1]
-            x2 = xvar[i  ]
-
-            if x < x2
-                deltaY = yvar[i] - yvar[i-1]
-                return yvar[i-1] + deltaY * (x - x1) / (x2 - x1)
-            end
-        end
-
-        # Last possible choice
-        return yvar[l]
     end
+
+    for i in 2:l
+        x1 = xvar[i-1]
+        x2 = xvar[i  ]
+
+        if x < x2
+            deltaY = yvar[i] - yvar[i-1]
+            return yvar[i-1] + deltaY * (x - x1) / (x2 - x1)
+        end
+    end
+
+    # If nothing has been returned, last possible choice
+    return yvar[l]
+
 end
 
 #-------------------------------------------------------------------------------------------------
 #--
 #-- Date functions
 #--
-function date2days(d)
+function date2days(d::Date)::Float64
     return convert(Float64, datetime2rata(d) - datetime2rata(BASE_DATE))
 end
 
-function days2date(d)
+function days2date(d::Float64)::Date
     return BASE_DATE + Day(d)
 end
+
+# Converts a time (in days from BASE_DATE) to a time point in model time
+# Example: if modelStart is 30, the model starts (model time = 0) 30 days after BASE_DATE
+# Real date 45 days after BASE_DATE is time = 15 in model time.
+function timeReal2Model(real_time::Float64, modelStart::Float64)
+    return real_time - modelStart
+end
+
+function timeModel2Real(model_time::Float64, modelStart::Float64)
+    return model_time + modelStart
+end
+
+# Equivalent functions for Dates
+function timeReal2Model(real_date::Date, modelStart::Float64)
+    return timeReal2Model(date2days(real_date), modelStart)
+end
+
+function timeModel2Real(model_date::Date, modelStart::Float64)
+    return timeModel2Real(date2days(model_date), modelStart)
+end
+
+# Equivalent functions for countries as Strings
+function timeReal2Model(real_time, country::String)
+    return timeReal2Model(real_time, getCountryStartDate(country))
+end
+
+function timeModel2Real(model_time, country::String)
+    return timeModel2Real(model_time, getCountryStartDate(country))
+end
+
+
 
 # Peak date
 const peakDate = Dict(
@@ -119,15 +152,7 @@ function ensurePositive(d,s)
 end
 
 
-
 function plotCountriestoDisk(suffix)
-    #--------------------------------------------------------------------------------------------------
-    #-- Plot
-    #--
-
-    # Get the modelStart parameter
-    position = findfirst("modelStart" .== COUNTRY_NAMES)
-
     for (c, _) in COUNTRY_LIST
         global country = c
 
@@ -137,11 +162,9 @@ function plotCountriestoDisk(suffix)
         sol = calculateSolution(country,
                                 DiseaseParameters,
                                 countryData[country][:params];
-                                finalDate = Date(2020, 6, 1))
+                                finalDate = Date(2020, 8, 1))
 
-        # print(country); print(" "); println(countryData[country][:params][position])
-
-        ax.plot(sol.t,
+        ax.plot(timeModel2Real.(sol.t, country),
                 calculateTotalDeaths(sol),
                 label = "Forecast");
 
@@ -159,6 +182,58 @@ function plotCountriestoDisk(suffix)
 end
 
 
-function allSingleLosses()
-    [(c, singleCountryLoss(c, countryData[c][:params])) for (c, _) in COUNTRY_LIST]
+# Generates the current training loss of all countries.
+function allSingleLosses(; sorted = false)
+    losses = [(c, singleCountryLoss(c, countryData[c][:params])) for (c, _) in COUNTRY_LIST]
+    losses = [ [e for (_, e) in losses], [c for (c, _) in losses] ]
+    sort(DataFrame(losses), rev = sorted)
+end
+
+
+
+function saveParameters()
+    allCountryNames = DataFrame(country = [countryData[c][:name] for (c, _) in COUNTRY_LIST])
+
+    allCountryParams = [countryData[c][:params] for (c, _) in COUNTRY_LIST]
+    allCountryParams = DataFrame(transpose(reduce(hcat, allCountryParams)))
+    rename!(allCountryParams, COUNTRY_NAMES)
+
+    allCountryParams = hcat(allCountryNames, allCountryParams)
+
+    DF = DataFrame(DiseaseParameters')
+    rename!(DF, DISEASE_NAMES)
+
+    nowString = repr(now())
+    CSV.write("data/" * nowString * "_CountryParameters.csv", allCountryParams)
+    CSV.write("data/" * nowString * "_DiseaseParameters.csv", DF)
+end
+
+
+function plotVignette()
+    plotly()
+
+    plot_dict  = Dict()
+    for (country, _) in COUNTRY_LIST
+        sol = calculateSolution(country,
+                                DiseaseParameters,
+                                countryData[country][:params];
+                                finalDate = Date(2020, 7, 1))
+
+        plot_dict[country] = Plots.plot(title = country)
+        plot_dict[country] = Plots.xaxis!("")
+        plot_dict[country] = Plots.yaxis!("", :log10)
+
+        xvar = timeModel2Real.(sol.t, country)
+        yvar = calculateTotalDeaths(sol)
+        plot_dict[country] = Plots.plot!(xvar, yvar, label = "")
+
+        xvar = countryData[country][:cases][:t]
+        yvar = countryData[country][:cases].deaths
+        plot_dict[country] = Plots.scatter!(xvar, yvar, label = "", marker = :circle, markeralpha = 0.1)
+    end
+
+    list_plots = [plot for (_, plot) in plot_dict]
+    vignette = Plots.plot(list_plots...)
+
+    return vignette
 end
