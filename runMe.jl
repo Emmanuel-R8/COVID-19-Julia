@@ -55,7 +55,12 @@ COUNTRY_LIST = [
 
 COUNTRY_LIST_N = length(COUNTRY_LIST)
 
-countryData = Dict( c => populateCountryDate(c, h, useOptimised = false) for (c, h) in COUNTRY_LIST)
+countryData = Dict( c => populateCountryData(c, h, useOptimised = false) for (c, h) in COUNTRY_LIST)
+
+# Update cases if the database is updated at somm intermediate step
+for (c, _) in COUNTRY_LIST
+    updateCountryCases(c)
+end
 
 # Update countryData[] if the COUNTRY_LIST is updated at some intermediate step
 println("Populating: ")
@@ -88,7 +93,7 @@ end
 fullRange = vcat(DISEASE_RANGE, fullRange)
 result = bboptimize(fullEpidemyLoss,
                     SearchRange = fullRange,
-                    MaxTime = 1000,
+                    MaxTime = 300,
                     TraceMode = :compact)
 
 best = best_candidate(result)
@@ -118,13 +123,19 @@ plotCountriestoDisk(repr(now()));
 using Printf
 Base.show(io::IO, f::Float64) = @printf(io, "%1.3f", f)
 
-for run in 1:1
+N_RUNS = 3
+
+for run in 1:N_RUNS
+    #-------------------------------------------------------------------------------------------------
+    # Update Epidemiology
+    updateEpidemiologyOnce(maxtime = 300)
+
+
     #-------------------------------------------------------------------------------------------------
     #--
     #-- Optimisition all countries at once
-    # Determine optimal parameters for each country
 
-    #-- Build a vector of all the countries' parameters
+    #-- Build a vector of all the countries' parameters with start date constraints
     fullRange = empty([(0.0, 0.0)])
     for (c1, _) in COUNTRY_LIST
         countryRange = COUNTRY_RANGE
@@ -135,7 +146,7 @@ for run in 1:1
     #-- Optimise
     best = best_candidate(bboptimize(updateCountriesAll,
                                     SearchRange = fullRange,
-                                    MaxTime = 60,
+                                    MaxTime = 300,
                                     TraceMode = :compact))
 
     #-- Store the optimised parameters
@@ -147,11 +158,6 @@ for run in 1:1
 
         global countryData[country][:params] = best[country_start_index:country_final_index]
     end
-
-
-    #-------------------------------------------------------------------------------------------------
-    # Update Epidemiology
-    updateEpidemiologyOnce()
 
 
     #-------------------------------------------------------------------------------------------------

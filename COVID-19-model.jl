@@ -155,8 +155,8 @@ function calculateSolution(country, diseaseparams, countryparams;
     r₀, tₗ, tᵢ, tₕ, tᵤ, γₑ, γᵢ, γⱼ, γₖ, δₖ, δₗ, δᵤ = diseaseparams
     modelStart, infectedM, infectiousM, mv0, mv1, mv2, mv3, mv4, mv5, mv6, mv7, mv8, mv9 = countryparams
 
-    mitigation = [(0, mv0), (7, mv1), (14, mv2), (21, mv3), (28, mv4),
-                  (35, mv5), (42, mv6), (49, mv7), (56, mv8), (63, mv9)]
+    mitigation = [(0, mv0), (7, mv1), (14, mv2), (21, mv3), (35, mv4),
+                  (49, mv5), (63, mv6), (77, mv7), (91, mv8), (105, mv9)]
 
 
     # First date should the date of the last death reported
@@ -285,7 +285,12 @@ function forecastOnActualDates(sol, country::String)
     finalModelDay = timeReal2Model(finalRecordDate, country)
 
     # Make a linear approximation of the forecast to match the actual days
-    forecast = [ linearInterpolation(t, sol.t, forecastDeaths) for t in startModelDay:finalModelDay]
+
+    # -- How many steps to forecast?
+    l = length(countryData[country][:cases].time)
+
+    forecast = [ linearInterpolation(t, sol.t, forecastDeaths)
+                     for t in range(startModelDay, stop = finalModelDay, length = l)]
 
     # Select the actual deaths record on those dates
     relevantCases = countryData[country][:cases][:, :deaths]

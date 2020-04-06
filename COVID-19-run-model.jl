@@ -5,16 +5,22 @@
 using DataFrames, DataFramesMeta
 
 function forecastError(actual, forecast)
-    # Linear error
-    # Prepare the value to never be negative, then add 1 (to avoid log errors)
-    return sqrt(sum(( actual .- forecast).^2)) / length(actual)
 
-    # Logarithmic error
+    # If logarithms are used, avoid errors.
+    actual   = max.(actual,   0.0) .+ 1.0  # Should never happen
+    forecast = max.(forecast, 0.0) .+ 1.0
+
+    # Log error
+    actual = log.(actual)
+    forecast = log.(forecast)
+
+    err = forecast .- actual
+
+    # Penality for being negative (less forecast than actual)
+    err = err .+ exp.(-err)
+
     # Prepare the value to never be negative (to avoid log errors)
-    # actual   = max.(actual,   0.00001)  # Should never happen
-    # forecast = max.(forecast, 0.00001)
-    #
-    # return sqrt(sum( ( log.(actual) .- log.(forecast)).^2)) / length(actual)
+    return sqrt( sum(err.^2)/length(actual) )
 end
 
 
@@ -104,7 +110,7 @@ function updateCountryOnce(country; maxtime = 60)
     # Determine optimal parameters for each countryw
     result = bboptimize(countryData[country][:lossFunction],
                         SearchRange = COUNTRY_RANGE,
-                        MaxTime = 30; TraceMode = :compact)
+                        MaxTime = maxtime; TraceMode = :compact)
     println(country)
     print("Before                     "); @show p
     print("After "); @show best_candidate(result)
@@ -134,5 +140,5 @@ function updateCountriesAll(params)
         totalLoss += forecastError(forecastDeaths[2], forecastDeaths[3])
     end
 
-    return sqrt(totalLoss)
+    return totalLoss
 end

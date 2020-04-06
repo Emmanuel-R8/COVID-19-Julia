@@ -140,9 +140,6 @@ function populateCountryDate(country, hemisphere; useOptimised = true)
     countryData[:hospital_capacity] = hospital_capacity
     countryData[:age_distribution] = age_distribution
 
-    countryData[:params] = COUNTRY_INIT
-    countryData[:range] = COUNTRY_RANGE
-
     countryData[:lossFunction] = p -> singleCountryLoss(country, p)
 
     if useOptimised == true
@@ -150,9 +147,39 @@ function populateCountryDate(country, hemisphere; useOptimised = true)
         if nrow(p) == 1
             countryData[:params] =  convert(Array, p)
         end
+    else
+        countryData[:params] = COUNTRY_INIT
+        countryData[:range] = COUNTRY_RANGE
     end
 
     return countryData
+end
+
+
+# Update the record of cases for countries after an update
+function updateCountryCases(country)
+
+    # Cases from the ECDC database
+    caseDB = COUNTRY_DB[:cases]
+
+    # select the right country
+    ecdc = @where(caseDB, country .== :countriesAndTerritories)
+
+    # Add a date comlumn in the Date type and convert to days
+    ecdc[!, :time] = Date.(ecdc.year, ecdc.month, ecdc.day)
+    ecdc[!, :t] = date2days.(ecdc.time)
+
+    # and order all dates in ascending order
+    ecdc = @orderby(ecdc, :time)
+
+    # Convert cases and deaths from daily deaths to cumulative amounts
+    ecdc.cases = cumsum(ecdc.cases)
+    ecdc.deaths = cumsum(ecdc.deaths)
+
+    # Only retain entries where there is a strictily positive number of deaths
+    ecdc = @where(ecdc, :deaths .> 0)
+
+    global countryData[country][:cases] = ecdc
 end
 
 
@@ -174,5 +201,5 @@ function approximateModelStartRange(country::String)
     # Convert to day
     above_day = date2days(first_date_above)
 
-    return(above_day - 7.0, above_day + 7.0)
+    return(above_day - 10.0, above_day + 2.0)
 end

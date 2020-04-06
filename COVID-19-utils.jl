@@ -25,7 +25,6 @@ function linearInterpolation(x, xvar, yvar)
 
     # If nothing has been returned, last possible choice
     return yvar[l]
-
 end
 
 #-------------------------------------------------------------------------------------------------
@@ -87,8 +86,8 @@ function R₀(d; r₀ = baseR₀, latitude = :north)
 end
 
 #%% Epidemy mitigation
-const DEFAULT_MITIGATION = [(0, 1.0),  (7, 0.8), (14, 0.5), (21, 0.5), (28, 0.5),
-                            (35, 0.5), (42, 0.5), (49, 0.5), (56, 0.5), (63, 0.5)]
+const DEFAULT_MITIGATION = [(0, 1.0),  (7, 0.8), (14, 0.5), (21, 0.5), (35, 0.5),
+                            (49, 0.5), (63, 0.5), (77, 0.5), (91, 0.5), (105, 0.5)]
 
 function getCurrentRatio(d; start = BASE_DAYS, schedule = DEFAULT_MITIGATION)
     l = length(schedule)
