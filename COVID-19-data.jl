@@ -80,7 +80,7 @@ COUNTRY_DB = loadData()
 #--
 #-- Create a dictionary populated with the information of a given country
 #--
-function populateCountryDate(country, hemisphere; useOptimised = true)
+function populateCountryData(country, hemisphere; useOptimised = true)
 
     # This is the start of a country specific data structure. A dictionary is good enough for that purpose.
     countryData = Dict()
@@ -201,5 +201,5 @@ function approximateModelStartRange(country::String)
     # Convert to day
     above_day = date2days(first_date_above)
 
-    return(above_day - 10.0, above_day + 2.0)
+    return(above_day - 0.0, above_day + 50.0)
 end

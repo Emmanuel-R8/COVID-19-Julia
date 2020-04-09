@@ -89,7 +89,7 @@ end
 const DEFAULT_MITIGATION = [(0, 1.0),  (7, 0.8), (14, 0.5), (21, 0.5), (35, 0.5),
                             (49, 0.5), (63, 0.5), (77, 0.5), (91, 0.5), (105, 0.5)]
 
-function getCurrentRatio(d; start = BASE_DAYS, schedule = DEFAULT_MITIGATION)
+function getCurrentRatio(d; start = BASE_DAYS, schedule = DEFAULT_MITIGATION)::Float64
     l = length(schedule)
 
     # If l = 1, ratio will be the only one
@@ -107,7 +107,7 @@ function getCurrentRatio(d; start = BASE_DAYS, schedule = DEFAULT_MITIGATION)
         end
 
         # Last possible choice
-        return schedule[l][2]
+        return max(schedule[l][2], 0.0)
     end
 end
 
@@ -121,70 +121,34 @@ end
 
 # Population to compartments
 function Pop2Comp(P)
+    # List of compartments as vectors of age groups
+    # Reshape the parameters into an array of size n compartments x n Age groups
 
-    # To make copy/paste less prone to error
-    g = 0
+    P_array = reshape(P[1:nAgeGroup*COMPARTMENTS_N ], COMPARTMENTS_N, nAgeGroup)
 
-    S = P[ g*nAgeGroup + 1: (g+1)*nAgeGroup]; g += 1
-    E = P[ g*nAgeGroup + 1: (g+1)*nAgeGroup]; g += 1
-    I = P[ g*nAgeGroup + 1: (g+1)*nAgeGroup]; g += 1
-    J = P[ g*nAgeGroup + 1: (g+1)*nAgeGroup]; g += 1
-    H = P[ g*nAgeGroup + 1: (g+1)*nAgeGroup]; g += 1
-    C = P[ g*nAgeGroup + 1: (g+1)*nAgeGroup]; g += 1
-    R = P[ g*nAgeGroup + 1: (g+1)*nAgeGroup]; g += 1
-    D = P[ g*nAgeGroup + 1: (g+1)*nAgeGroup]; g += 1
-    K = P[ g*nAgeGroup + 1: (g+1)*nAgeGroup]; g += 1
-    L = P[ g*nAgeGroup + 1: (g+1)*nAgeGroup]; g += 1
+    list_c = Dict( (COMPARTMENTS_LIST[i], P_array[i, :]) for i in 1:COMPARTMENTS_N)
 
-    h = 1
-    BED = P[ g*nAgeGroup + h: g*nAgeGroup + h]; h += 1
-    ICU = P[ g*nAgeGroup + h: g*nAgeGroup + h]; h += 1
+    # List of single parameters
+    list_p = Dict(collect(zip(VARIABLES_LIST, P[(COMPARTMENTS_N*nAgeGroup + 1):end])))
 
-    return S, E, I, J, H, C, R, D, K, L, BED, ICU
+    return list_c, list_p
 end
 
 
-# Helper function to never change the number of individuals in a compartment in a way that would
-# make it below 0.1 (to avoid rounding errors around 0)
-function ensurePositive(d,s)
-    return max.(d .+ s, 0.1) .- s
+# When apply a change of dA to A, ensures that the resulting A in not negative (defined as 0.001)
+# If it is the case, adjust d accordingly
+function ensurePositive(dA::Array{Float64}, A::Array{Float64})::Array{Float64}
+    return max.(dA .+ A, 0.001) .- A
 end
 
-
-function plotCountriestoDisk(suffix)
-    for (c, _) in COUNTRY_LIST
-        global country = c
-
-        clf();
-        ioff();
-        fig, ax = PyPlot.subplots();
-        sol = calculateSolution(country,
-                                DiseaseParameters,
-                                countryData[country][:params];
-                                finalDate = Date(2020, 8, 1))
-
-        ax.plot(timeModel2Real.(sol.t, country),
-                calculateTotalDeaths(sol),
-                label = "Forecast");
-
-        ax.plot(countryData[country][:cases][:t],
-                countryData[country][:cases].deaths, "ro", label = "Actual", alpha = 0.3);
-
-        ax.legend(loc="lower right");
-        ax.set_title(country);
-        ax.set_xlabel("time");
-        ax.set_ylabel("Individuals");
-        ax.set_yscale("log");
-
-        PyPlot.savefig("images/country_" * country * "_" * suffix * ".png");
-    end
+function ensurePositive(dA::Float64, A::Float64)::Float64
+    return max.(dA .+ A, 0.001) .- A
 end
 
 
 # Generates the current training loss of all countries.
 function allSingleLosses(; sorted = false)
-    losses = [(c, singleCountryLoss(c, countryData[c][:params])) for (c, _) in COUNTRY_LIST]
-    losses = [ [e for (_, e) in losses], [c for (c, _) in losses] ]
+    losses = [(singleCountryLoss(c, countryData[c][:params]), c) for (c, _) in COUNTRY_LIST]
     sort(DataFrame(losses), rev = sorted)
 end
 
@@ -203,16 +167,18 @@ function saveParameters()
     rename!(DF, DISEASE_NAMES)
 
     nowString = repr(now())
-    CSV.write("data/" * nowString * "_CountryParameters.csv", allCountryParams)
-    CSV.write("data/" * nowString * "_DiseaseParameters.csv", DF)
+    CSV.write("data/" * nowString * "_CountryParameters.csv", allCountryParams; delim = ", ")
+    CSV.write("data/" * nowString * "_DiseaseParameters.csv", DF; delim = ", ")
 end
 
 
+using Plotly
 function plotVignette()
     plotly()
 
     plot_dict  = Dict()
     for (country, _) in COUNTRY_LIST
+        println(country)
         sol = calculateSolution(country,
                                 DiseaseParameters,
                                 countryData[country][:params];
@@ -226,7 +192,7 @@ function plotVignette()
         yvar = calculateTotalDeaths(sol)
         plot_dict[country] = Plots.plot!(xvar, yvar, label = "")
 
-        xvar = countryData[country][:cases][:t]
+        xvar = countryData[country][:cases].t
         yvar = countryData[country][:cases].deaths
         plot_dict[country] = Plots.scatter!(xvar, yvar, label = "", marker = :circle, markeralpha = 0.1)
     end
@@ -235,4 +201,66 @@ function plotVignette()
     vignette = Plots.plot(list_plots...)
 
     return vignette
+end
+
+function plotCountry(country::String; finalDate = Date(2020, 7, 1))
+    plotly()
+
+    sol = calculateSolution(country,
+                            DiseaseParameters,
+                            countryData[country][:params];
+                            finalDate = finalDate)
+
+    p = Plots.plot(title = country)
+    p = Plots.xaxis!("")
+    p = Plots.yaxis!("", :log10)
+
+    xvar = timeModel2Real.(sol.t, country)
+    totalInCompartments = 0.0 .* calculateTotalCompartment(sol, "S")
+    for c in COMPARTMENTS_LIST
+        yvar = calculateTotalCompartment(sol, c)
+        totalInCompartments = totalInCompartments .+ yvar
+
+        p = Plots.plot!(xvar, yvar, label = c)
+    end
+
+    p = Plots.plot!(xvar, totalInCompartments, label = "Total")
+
+    xvar = countryData[country][:cases].t
+    yvar = countryData[country][:cases].deaths
+    p = Plots.scatter!(xvar, yvar, label = "", marker = :circle, markeralpha = 0.1)
+
+    return Plots.plot(p)
+end
+
+
+using PyPlot
+function plotCountriestoDisk(suffix)
+    pyplot()
+    for (c, _) in COUNTRY_LIST
+        global country = c
+
+        clf();
+        ioff();
+        fig, ax = PyPlot.subplots();
+        sol = calculateSolution(country,
+                                DiseaseParameters,
+                                countryData[country][:params];
+                                finalDate = Date(2020, 8, 1))
+
+        ax.plot(timeModel2Real.(sol.t, country),
+                calculateTotalDeaths(sol),
+                label = "Forecast");
+
+        ax.plot(countryData[country][:cases].t,
+                countryData[country][:cases].deaths, "ro", label = "Actual", alpha = 0.3);
+
+        ax.legend(loc="lower right");
+        ax.set_title(country);
+        ax.set_xlabel("time");
+        ax.set_ylabel("Individuals");
+        ax.set_yscale("log");
+
+        PyPlot.savefig("images/country_" * country * "_" * suffix * ".png");
+    end
 end
