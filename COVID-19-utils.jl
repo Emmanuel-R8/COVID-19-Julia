@@ -87,7 +87,7 @@ end
 
 #%% Epidemy mitigation
 const DEFAULT_MITIGATION = [(0, 1.0),  (7, 0.8), (14, 0.5), (21, 0.5), (35, 0.5),
-                            (49, 0.5), (63, 0.5), (77, 0.5), (91, 0.5), (105, 0.5)]
+                            (42, 0.5), (49, 0.5), (63, 0.5), (77, 0.5), (91, 0.5)]
 
 function getCurrentRatio(d; start = BASE_DAYS, schedule = DEFAULT_MITIGATION)::Float64
     l = length(schedule)
@@ -148,7 +148,7 @@ end
 
 # Generates the current training loss of all countries.
 function allSingleLosses(; sorted = false)
-    losses = [(singleCountryLoss(c, countryData[c][:params]), c) for (c, _) in COUNTRY_LIST]
+    losses = [(singleCountryLoss(c, DiseaseParameters, countryData[c][:params]), c) for (c, _) in COUNTRY_LIST]
     sort(DataFrame(losses), rev = sorted)
 end
 
@@ -179,23 +179,25 @@ function plotVignette()
     plot_dict  = Dict()
     for (country, _) in COUNTRY_LIST
         println(country)
+
         sol = calculateSolution(country,
                                 DiseaseParameters,
                                 countryData[country][:params];
                                 finalDate = Date(2020, 7, 1))
 
         plot_dict[country] = Plots.plot(title = country)
-        plot_dict[country] = Plots.xaxis!("")
-        plot_dict[country] = Plots.yaxis!("", :log10)
-
-        xvar = timeModel2Real.(sol.t, country)
-        yvar = calculateTotalDeaths(sol)
-        plot_dict[country] = Plots.plot!(xvar, yvar, label = "")
 
         xvar = countryData[country][:cases].t
         yvar = countryData[country][:cases].deaths
         plot_dict[country] = Plots.scatter!(xvar, yvar, label = "", marker = :circle, markeralpha = 0.1)
-    end
+
+        xvar = timeModel2Real.(sol.t, country)
+        yvar = getSummedCompartment(sol, "D")
+        plot_dict[country] = Plots.plot!(xvar, yvar, label = "")
+
+        plot_dict[country] = Plots.xaxis!("")
+        plot_dict[country] = Plots.yaxis!("", :log10)
+     end
 
     list_plots = [plot for (_, plot) in plot_dict]
     vignette = Plots.plot(list_plots...)
@@ -212,13 +214,15 @@ function plotCountry(country::String; finalDate = Date(2020, 7, 1))
                             finalDate = finalDate)
 
     p = Plots.plot(title = country)
-    p = Plots.xaxis!("")
-    p = Plots.yaxis!("", :log10)
+
+    xvar = countryData[country][:cases].t
+    yvar = countryData[country][:cases].deaths
+    p = Plots.scatter!(xvar, yvar, label = "", marker = :circle, markeralpha = 0.30)
 
     xvar = timeModel2Real.(sol.t, country)
-    totalInCompartments = 0.0 .* calculateTotalCompartment(sol, "S")
+    totalInCompartments = 0.0 .* getSummedCompartment(sol, "S")
     for c in COMPARTMENTS_LIST
-        yvar = calculateTotalCompartment(sol, c)
+        yvar = getSummedCompartment(sol, c)
         totalInCompartments = totalInCompartments .+ yvar
 
         p = Plots.plot!(xvar, yvar, label = c)
@@ -226,9 +230,8 @@ function plotCountry(country::String; finalDate = Date(2020, 7, 1))
 
     p = Plots.plot!(xvar, totalInCompartments, label = "Total")
 
-    xvar = countryData[country][:cases].t
-    yvar = countryData[country][:cases].deaths
-    p = Plots.scatter!(xvar, yvar, label = "", marker = :circle, markeralpha = 0.1)
+    p = Plots.xaxis!("")
+    p = Plots.yaxis!("", :log10)
 
     return Plots.plot(p)
 end
@@ -243,17 +246,18 @@ function plotCountriestoDisk(suffix)
         clf();
         ioff();
         fig, ax = PyPlot.subplots();
+
+        ax.plot(countryData[country][:cases].t,
+                countryData[country][:cases].deaths, "ro", label = "Actual", alpha = 0.3);
+
         sol = calculateSolution(country,
                                 DiseaseParameters,
                                 countryData[country][:params];
                                 finalDate = Date(2020, 8, 1))
 
-        ax.plot(timeModel2Real.(sol.t, country),
-                calculateTotalDeaths(sol),
+        ax.plot(timeModel2Real.(sol.t, c),
+                getSummedCompartment(sol, "D"),
                 label = "Forecast");
-
-        ax.plot(countryData[country][:cases].t,
-                countryData[country][:cases].deaths, "ro", label = "Actual", alpha = 0.3);
 
         ax.legend(loc="lower right");
         ax.set_title(country);

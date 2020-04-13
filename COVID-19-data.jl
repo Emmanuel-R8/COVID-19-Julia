@@ -140,8 +140,6 @@ function populateCountryData(country, hemisphere; useOptimised = true)
     countryData[:hospital_capacity] = hospital_capacity
     countryData[:age_distribution] = age_distribution
 
-    countryData[:lossFunction] = p -> singleCountryLoss(country, p)
-
     if useOptimised == true
         p =  @where(COUNTRY_DB[:optimisedParameters], occursin.(country, :country))[:, 3:end]
         if nrow(p) == 1
@@ -188,8 +186,8 @@ end
 #-- Find the date at which cases exceed 5 for a given country
 #--
 function approximateModelStartRange(country::String)
-    # Estimates when deaths number is about DEATH_AT_MODEL_START
-    above = @where(countryData[country][:cases], :deaths .> DEATH_AT_MODEL_START)
+    # Estimates when deaths number is about 5
+    above = @where(countryData[country][:cases], :deaths .> 5)
 
     # Take first date
     if nrow(above) > 0
@@ -201,5 +199,5 @@ function approximateModelStartRange(country::String)
     # Convert to day
     above_day = date2days(first_date_above)
 
-    return(above_day - 0.0, above_day + 50.0)
+    return(above_day - 21.0, above_day + 0.0)
 end

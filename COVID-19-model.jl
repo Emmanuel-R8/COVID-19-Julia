@@ -25,15 +25,59 @@ function epiDynamics!(dP, P, params, t)
     K = P[c*nAgeGroup + 1:c*nAgeGroup + nAgeGroup]; c += 1
     L = P[c*nAgeGroup + 1:c*nAgeGroup + nAgeGroup]; c += 1
 
-    (BED, ICU) = P[nAgeGroup*COMPARTMENTS_N:end]
-    BED = BED[1]
-    ICU = ICU[1]
-
     r₀, tₗ, tᵢ, tₕ, tᵤ, tᵣ,
         γₑ, γᵢ, γⱼ, γₖ, γᵣ,
         δₖ, δₗ, δᵤ ,
         mitigation,
         BED_max, ICU_max, Population = params
+
+
+
+    ####### Step 0:
+    # The DE solving algorithm seems to sometimes overshoot when exploring a solution space
+    # which is not acceptable with too many beds used.
+    # If excess use of beds, we need to push individuals off.
+
+    # How many ICU beds are used?
+    ICU = sum(C)
+    LC = CL = 0.0
+
+    # First in ICU: move excess from C to L
+    if ICU >= ICU_max
+        patientMove = (ICU - ICU_max) / sum(C) .* C
+        L = L .+ patientMove
+        C = C .- patientMove
+        CL = patientMove;                                       LC = -CL
+    end
+
+    # How many beds are used?
+    BED = sum(H) + sum(L) + (ICU - ICU_max)
+    JH = HJ = 0.0
+    KL = LK = 0.0
+
+    if BED >= BED_max
+        # We need to move this number of patients
+        patientMove =  (BED - BED_max)
+
+        # They are moved first if severe condition (H to J);
+        patientFromH = min(sum(H), patientMove); patientFromH = max(patientFromH, 0.0)
+
+        # then moved if in critical condition (L to K)
+        patientMove = patientMove - patientFromH
+        patientFromL = min(sum(L), patientMove); patientFromL = max(patientFromL, 0.0)
+
+        # Do the actual moves
+        patientFromH = patientFromH / sum(H) .* H
+        H = H .- patientFromH
+        J = J .+ patientFromH
+        HJ = patientFromH;                                      JH = -HJ
+
+        patientFromL = patientFromL / sum(L) .* L
+        L = L .- patientFromL
+        K = K .+ patientFromL
+        LK = patientFromL;                                      KL = -LK
+    end
+
 
 
     ####################################
@@ -49,9 +93,9 @@ function epiDynamics!(dP, P, params, t)
     IR = (1 .- mₐ)       .* I / tᵢ;  IR = max.(IR, 0.0001);     RI = -IR
     JR = (1 .- cₐ)       .* J / tₕ;  JR = max.(JR, 0.0001);     RJ = -JR
     HR = (1 .- cₐ)       .* H / tₕ;  HR = max.(HR, 0.0001);     RH = -HR
-    KR = (1 .- δₖ .* fₐ) .* K / tᵤ;  KR = max.(KR, 0.0001);     RK = -KR
-    LR = (1 .- δₗ .* fₐ) .* L / tᵤ;  LR = max.(LR, 0.0001);     RL = -LR
-    CR = (1 .- δᵤ .* fₐ) .* C / tᵤ;  CR = max.(CR, 0.0001);     RC = -CR
+    KR = (1 .- (δₖ * δᵤ) .* fₐ) .* K / tᵤ;  KR = max.(KR, 0.0001);     RK = -KR
+    LR = (1 .- (δₗ * δᵤ) .* fₐ) .* L / tᵤ;  LR = max.(LR, 0.0001);     RL = -LR
+    CR = (1 .-       δᵤ  .* fₐ) .* C / tᵤ;  CR = max.(CR, 0.0001);     RC = -CR
 
     # Full recovery arrows
     RF = ones(nAgeGroup) .* R / tᵣ;  RF = max.(RF, 0.0001);     FR = -RF
@@ -64,6 +108,9 @@ function epiDynamics!(dP, P, params, t)
 
     ####################################
     # Bed transfers
+
+    ICU = sum(C)
+    BED = sum(H) + sum(L)
 
     ####### Step 1:
     # Decrease in ICU usage after 14 days (recall that CD and CR are vectors over the age groups)
@@ -82,7 +129,7 @@ function epiDynamics!(dP, P, params, t)
 
     # Move as many patients as possible from $L$ to $C$ in proportion of each group
     ICU_transfer = min(sum(L), ICU_free)
-    LC = ICU_transfer / sum(L) .* L;                            CL = -LC
+    LC = LC .+ ICU_transfer / sum(L) .* L;                      CL = -LC
     if PRINT_DEBUG
         @show ICU_transfer
         @show sum(LC)
@@ -103,7 +150,7 @@ function epiDynamics!(dP, P, params, t)
 
     # Move as many patients as possible from $K$ to $L$ in proportion of each group
     BED_transfer = min(sum(K), BED_free)
-    KL = BED_transfer / sum(K) .* K;                            LK = -KL
+    KL = KL .+ BED_transfer / sum(K) .* K;                      LK = -KL
 
     # Overall change in normal bed becomes
     dBED = dBED + BED_transfer
@@ -116,7 +163,7 @@ function epiDynamics!(dP, P, params, t)
 
     # Move as many patients as possible from $J$ to $H$ in proportion of each group
     BED_transfer = min(sum(J), BED_free)
-    JH = BED_transfer / sum(J) .* J;                            HJ = -JH
+    JH = JH .+ BED_transfer / sum(J) .* J;                      HJ = -JH
 
     # Overall change in ICU bed becomes
     dBED = dBED + BED_transfer
@@ -175,14 +222,15 @@ function epiDynamics!(dP, P, params, t)
     dD = max.(dD, 0.0001)
 
     # Vector change of population and update in place
-    result = vcat(dS, dE, dI, dJ, dH, dC, dR, dF, dD, dK, dL, [dBED], [dICU])
+    result = vcat(dS, dE, dI, dJ, dH, dC, dR, dF, dD, dK, dL)
 
     for i = 1:length(result)
         dP[i] = result[i]
     end
 
     if PRINT_DEBUG
-        pf = map(sum, [dS, dE, dI, dJ, dH, dK, dL, dC, dD, dR, dF, [dBED], [BED], [BED_max], [dICU], [ICU], [ICU_max],
+        pf = map(sum, [dS, dE, dI, dJ, dH, dK, dL, dC, dD, dR, dF,
+                       [dBED], [BED], [BED_max], [dICU], [ICU], [ICU_max],
                        dS + dE + dI + dJ + dH + dK + dL + dC + dD + dR + dF])
         @show pf
         #readline()
@@ -201,7 +249,7 @@ function calculateSolution(country, diseaseparams, countryparams;
     modelStart, infectedM, infectiousM, mv0, mv1, mv2, mv3, mv4, mv5, mv6, mv7, mv8, mv9 = countryparams
 
     mitigation = [(0, mv0), (7, mv1), (14, mv2), (21, mv3), (35, mv4),
-                  (49, mv5), (63, mv6), (77, mv7), (91, mv8), (105, mv9)]
+                  (42, mv5), (49, mv6), (63, mv7), (77, mv8), (91, mv9)]
 
 
     # First date should the date of the last death reported
@@ -271,11 +319,7 @@ function calculateSolution(country, diseaseparams, countryparams;
     K0 = 0.0001 .* ones(Float64, nAgeGroup)
     L0 = 0.0001 .* ones(Float64, nAgeGroup)
 
-    # Everybody confirmed is in hospital. Assume 1 ICU bed to stay away from zeros.
-    BED = [TotalInfectious]
-    ICU = [1.0]
-
-    P0 = vcat(S0, E0, I0, J0, H0, C0, R0, F0, D0, K0, L0, BED, ICU)
+    P0 = vcat(S0, E0, I0, J0, H0, C0, R0, F0, D0, K0, L0)
 
     # Differential equation solver
     model = ODEProblem(epiDynamics!, P0, tSpan, model_params)
@@ -284,26 +328,6 @@ function calculateSolution(country, diseaseparams, countryparams;
     sol = solve(model, Tsit5(); progress = false)
 
     return sol
-end
-
-
-
-# Calculate the forecast total individual in a given compartment.
-# The calculation is performed at each time steps of the solutions generated by the model
-function calculateTotalCompartment(sol, comp::String)
-    # The solutions in 'soll are presented as a vector of vectors:
-    #  - it is a vector of size the number of timesteps
-    #  - each element of the vector is a vector of all the variables
-    nSteps = length(sol.t);
-    nVars  = length(sol.u[1]);
-
-    # Creates an Array (variables x time steps)
-    solMat = reduce(hcat, sol.u)
-
-    # Select the rows of Dx and sums to have total deaths at each time period
-    total = sum(solMat[compIndex(comp):compIndex(comp) + nAgeGroup - 1, :]; dims = 1)
-
-    return total[:]
 end
 
 
@@ -316,9 +340,13 @@ function getSummedCompartment(sol, C::String)
     #  - each element of the vector is a vector of all the variables
     # Creates an Array (variables x time steps)
     solMat = reduce(hcat, sol.u)
+    l = size(solMat)[2]
 
     # Select the rows of Dx and sums to have total deaths at each time period
-    return sum(solMat[compIndex(C):compIndex(C) + nAgeGroup - 1, :]; dims=1)
+    result = sum(solMat[compIndex(C):compIndex(C) + nAgeGroup - 1, :]; dims=1)
+
+    # Reshape to have a 1-D vector
+    return reshape(result, l)
 end
 
 
@@ -336,7 +364,7 @@ end
 # Calculate the total deaths forecast by the model on the dates for which there is an actual
 # record.
 # calculateTotalDeaths calculates for each time step on model time
-# forecastOnActualDates calculates on the time the actual dates fall on when converted
+# forecastOnCompartmentActualDates calculates on the time the actual dates fall on when converted
 #   to model time.
 function forecastCompartmentOnActualDates(sol, C::String, country::String)
     # The model always starts at time 0 to deals with the mitigation ratio (which starts at 0)
@@ -391,50 +419,4 @@ function forecastVariableOnActualDates(sol, C::String, country::String)
     l = length(countryData[country][:cases].time)
 
     return [ linearInterpolation(t, sol.t, v) for t in range(startModelDay, stop = finalModelDay, length = l)]
-end
-
-
-
-
-
-# Calculate the total deaths forecast by the model on the dates for which there is an actual
-# record.
-# calculateTotalDeaths calculates for each time step on model time
-# forecastOnActualDates calculates on the time the actual dates fall on when converted
-#   to model time.
-function forecastOnActualDates(sol, country::String)
-    # The model always starts at time 0 to deals with the mitigation ratio (which starts at 0) and
-    # assumes 5 deaths at that date.
-    # The 'modelStart' parameter deals with shifting the model compared to the actual record to go
-    # from 'model time' to 'real time'
-
-    # Generate the forecast deaths on the dates of the model (in model time)
-    forecastDeaths = calculateTotalDeaths(sol)
-
-    # Get the start and final dates of the deaths record (in real time)
-    startRecordDate = first(countryData[country][:cases].time)
-    finalRecordDate = last(countryData[country][:cases].time)
-
-    startRecordDay = date2days(startRecordDate)
-    finalRecordDay = date2days(finalRecordDate)
-
-    # Translates the dates into model time
-    startModelDay = timeReal2Model(startRecordDate, country)
-    finalModelDay = timeReal2Model(finalRecordDate, country)
-
-    # Make a linear approximation of the forecast to match the actual days
-
-    # -- How many steps to forecast?
-    l = length(countryData[country][:cases].time)
-
-    forecast = [ linearInterpolation(t, sol.t, forecastDeaths)
-                     for t in range(startModelDay, stop = finalModelDay, length = l)]
-
-    # Select the actual deaths record on those dates
-    relevantCases = countryData[country][:cases][:, :deaths]
-    relevantCases = convert(Array, relevantCases)
-
-    return [[ t for t in startRecordDay:finalRecordDay],
-            relevantCases,
-            forecast]
 end

@@ -4,8 +4,7 @@
 #--
 using DataFrames, DataFramesMeta
 
-function forecastError(country::String, actual::Array{Float64}, forecast::Array{Float64},
-                                        beds::Array{Float64}, icus::Array{Float64})
+function forecastError(country::String, actual::Array{Float64}, forecast::Array{Float64})
     # number of forcast points
     l = length(actual)
 
@@ -14,41 +13,62 @@ function forecastError(country::String, actual::Array{Float64}, forecast::Array{
     forecast = max.(forecast, 0.0) .+ 1.0
 
     # Log error
-    actual = log.(actual)
-    forecast = log.(forecast)
+    # actual = log.(actual)
+    # forecast = log.(forecast)
+
+    # Power law
+    actual = sqrt.(actual)
+    forecast = sqrt.(forecast)
 
     err_deaths = forecast .- actual
 
-    # Penality for being negative (less forecast than actual)
+    # Penality regarding beds and icus for being negative (less forecast than actual)
     # To which extent forecast is under actual
-    Δ = (100 .* max.(actual .- forecast, 0.0)).^2
+    Δ = (max.(actual .- forecast, 0.0)).^2
     err_deaths = err_deaths .+ Δ
 
-    # Error on bed use
-    BED_Max = countryData[country][:hospital_capacity]
-    err_beds = exp.(min.(BED_Max .* ones(l) - beds, 0.0))
-
-    # Error on ICU use
-    ICU_Max = countryData[country][:ICU_capacity]
-    err_icus = exp.(min.(ICU_Max .* ones(l) - icus, 0.0))
-
-
     # Prepare the value to never be negative (to avoid log errors)
-    return sqrt( sum((err_deaths .+ err_beds .+ err_icus).^2) / l )
+    return sqrt( sum(err_deaths.^2) / l )
 end
 
 
-function singleCountryLoss(country::String, countryparams)
+function forecastError(country::String, actual::Array{Int64}, forecast::Array{Float64})
+    return forecastError(country, convert(Array{Float64}, actual), forecast)
+end
+
+
+function singleCountryLoss(country::String, diseaseparams, countryparams; finalDate = nothing)
     # finalDate = nothig to force using only the time span of actual recorded deaths
-    sol = calculateSolution(country, DiseaseParameters, countryparams; finalDate = nothing)
+    sol = calculateSolution(country, diseaseparams, countryparams; finalDate = finalDate)
 
     # Extract total deaths profile
     actual = convert(Array, countryData[country][:cases][:, :deaths])
     deaths = forecastCompartmentOnActualDates(sol, "D", country)
-    beds = forecastVariableOnActualDates(sol, "BED", country)
-    icus = forecastVariableOnActualDates(sol, "ICU", country)
+#    beds = forecastVariableOnActualDates(sol, "BED", country)
+#    icus = forecastVariableOnActualDates(sol, "ICU", country)
 
-    return forecastError(country, actual, deaths, beds, icus)
+    return forecastError(country, actual, deaths)
+    #return forecastError(country, actual, deaths, beds, icus)
+end
+
+
+
+function sumCountryLossesCountries(params)
+    totalError = 0.0
+
+    # Then each country for which the loss is immediately calculated
+    for n in 1:COUNTRY_N
+        country, _ = COUNTRY_LIST[n]
+
+        country_start_index = (n - 1) * COUNTRY_N + 1
+        country_final_index = (n - 1) * COUNTRY_N + COUNTRY_N
+        countryparams = params[country_start_index:country_final_index]
+
+        # loss =  sum( (log.(actual) .- log.(forecast)).^ 2 ) / length(actual)
+        totalError += singleCountryLoss(country, DiseaseParameters, countryparams)
+    end
+
+    return totalError
 end
 
 
@@ -63,7 +83,7 @@ function sumCountryLossesDisease(diseaseparams)
     for (country, _) in COUNTRY_LIST
         countryparams = countryData[country][:params]
 
-        totalError += singleCountryLoss(country, countryparams)
+        totalError += singleCountryLoss(country, diseaseparams, countryparams)
     end
 
     return totalError
@@ -110,14 +130,18 @@ function updateEpidemiologyOnce(;maxtime = 60)
     # Optimise the epidemiology
     println("OPTIMISING EPIDEMIOLOGY---------------------------")
 
+    print("Before     "); @show DiseaseParameters
+
     result = bboptimize(sumCountryLossesDisease,
                         SearchRange = DISEASE_RANGE;
                         Method = :adaptive_de_rand_1_bin,
                         MaxTime = maxtime,
+                        TargetFitness = 2.0,
                         NThreads = Threads.nthreads(),
                         TraceMode = :compact)
 
     global DiseaseParameters = best_candidate(result)
+    print("After      "); @show DiseaseParameters
 end
 
 function updateCountryOnce(country; maxtime = 60)
@@ -130,10 +154,11 @@ function updateCountryOnce(country; maxtime = 60)
     countryRange[COUNTRY_PARAM_START] = approximateModelStartRange(country)
 
     # Determine optimal parameters for each countryw
-    result = bboptimize(countryData[country][:lossFunction],
+    result = bboptimize(p -> singleCountryLoss(country, DiseaseParameters, p),
                         SearchRange = countryRange;
                         Method = :adaptive_de_rand_1_bin,
                         MaxTime = maxtime,
+                        TargetFitness = 2.0,
                         TraceMode = :compact)
 
     print("After "); @show best_candidate(result)
@@ -142,20 +167,12 @@ function updateCountryOnce(country; maxtime = 60)
 end
 
 
-function sumCountryLossesCountries(params)
-    totalError = 0.0
-
-    # Then each country for which the loss is immediately calculated
-    for n in 1:COUNTRY_N
-        country, _ = COUNTRY_LIST[n]
-
-        country_start_index = (n - 1) * COUNTRY_N + 1
-        country_final_index = (n - 1) * COUNTRY_N + COUNTRY_N
-        countryparams = params[country_start_index:country_final_index]
-
-        # loss =  sum( (log.(actual) .- log.(forecast)).^ 2 ) / length(actual)
-        totalError += singleCountryLoss(country, countryparams)
+function updateEveryCountry(; maxtime = 60)
+    #-------------------------------------------------------------------------------------------------
+    #--
+    #-- Optimisition all countries one by one
+    #--
+    for (country, _) in COUNTRY_LIST
+        updateCountryOnce(country; maxtime = maxtime)
     end
-
-    return totalError
 end

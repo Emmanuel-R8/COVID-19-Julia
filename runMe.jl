@@ -44,7 +44,8 @@ COUNTRY_LIST = [
     ("Poland",                      :north),
     ("Spain",                       :north),
     ("Sweden",                      :north),
-    ("United_Kingdom",              :north)]
+    ("United_Kingdom",              :north),
+    ("United_States_of_America",              :north)]
 
 
 countryData = Dict( c => populateCountryData(c, h, useOptimised = false) for (c, h) in COUNTRY_LIST)
@@ -54,18 +55,28 @@ plotCountriestoDisk("__beforeOptim")
 saveParameters()
 
 
-#-------------------------------------------------------------------------------------------------
-#--
-#-- Global optimisation across all countries
-#--
-
 # Print only 3 decimals
 using Printf
 Base.show(io::IO, f::Float64) = @printf(io, "%1.3f", f)
 
+#-------------------------------------------------------------------------------------------------
+#--
+#-- First calibration
+#--
+updateEveryCountry(;maxtime = 20)
+updateEpidemiologyOnce()
+
+plotVignette()
+plotCountriestoDisk("__first_calib")
+saveParameters()
+
+
+#-------------------------------------------------------------------------------------------------
+#--
+#-- Runs of all-country optim - disease parameters
+#--
 N_RUNS = 1
 for run in 1:N_RUNS
-
     #-------------------------------------------------------------------------------------------------
     #--
     #-- Optimisition all countries at once
@@ -80,11 +91,12 @@ for run in 1:N_RUNS
 
     #-- Optimise
     best = best_candidate(bboptimize(sumCountryLossesCountries,
-                                    SearchRange = fullRange;
-                                    Method = :adaptive_de_rand_1_bin,
-                                    MaxTime = 120,
-                                    NThreads = Threads.nthreads(),
-                                    TraceMode = :compact))
+                                     SearchRange = fullRange;
+                                     Method = :adaptive_de_rand_1_bin,
+                                     MaxTime = 1800,
+                                     TargetFitness = 2.0,
+                                     NThreads = Threads.nthreads(),
+                                     TraceMode = :compact))
 
     #-- Store the optimised parameters
     for i in 1:COUNTRY_N
@@ -98,7 +110,7 @@ for run in 1:N_RUNS
 
     #-------------------------------------------------------------------------------------------------
     # Update Epidemiology
-    updateEpidemiologyOnce(maxtime = 120)
+    updateEpidemiologyOnce(maxtime = 60)
 
     #-------------------------------------------------------------------------------------------------
     # Outputs
@@ -115,47 +127,16 @@ plotVignette()
 N_RUNS = 10
 for run in 1:N_RUNS
     println(); println("OPTIMISING THE WORST HALF OF COUNTRIES BY AVERAGE ERRORS---------------------------")
+
     scores = allSingleLosses(sorted = true)
     @show scores
-    for c1 in first(scores, COUNTRY_N ÷ 2)[:, 2]
-        global countryData
-
-        # Make a note of the disease parameters
-        p = countryData[c1][:params]
-        print(c1); println("-----------------------------")
-        print("Before                     "); @show p
-
-        # Determine optimal parameters for each countryw
-        countryRange = COUNTRY_RANGE
-        countryRange[COUNTRY_PARAM_START] = approximateModelStartRange(c1)
-
-        result = bboptimize(countryData[c1][:lossFunction],
-                            SearchRange = countryRange;
-                            Method = :adaptive_de_rand_1_bin,
-                            MaxTime = 20,
-                            TraceMode = :silent)
-
-        print("After "); @show best_candidate(result)
-
-        countryData[c1][:params] = best_candidate(result)
+    for c1 in first(scores, COUNTRY_N ÷ 3)[:, 2]
+        updateCountryOnce(c1; maxtime = 60)
     end
 
     # After having done all the countries, epidemiology again more seriously
-    println("OPTIMISING EPIDEMIOLOGY---------------------------")
-    # Optimise across all countries (using "France" just to have disease parameters to optimise)q
-
-    print("Before     "); @show DiseaseParameters
-    result = bboptimize(sumCountriesLossDisease,
-                        SearchRange = DISEASE_RANGE;
-                        Method = :adaptive_de_rand_1_bin,
-                        MaxTime = 60,
-                        NThreads = Threads.nthreads(),
-                        TraceMode = :silent)
-
-    print("After "); @show best_candidate(result)
+    updateEpidemiologyOnce(; maxtime = 60)
     println()
-
-    global DiseaseParameters = best_candidate(result)
 
     saveParameters()
     plotCountriestoDisk(repr(now()))
@@ -163,41 +144,6 @@ end
 
 plotVignette()
 
-
-plotCountriestoDisk(repr(now()))
-saveParameters()
-
-allDiseaseParameters = DiseaseParameters
-rename!(allDiseaseParameters, DISEASE_NAMES)
-
-@show DiseaseParameters
-
-
-
-
-#------------------------------------
-
-println("OPTIMISING COUNTRIES---------------------------")
-for (c1, _) in COUNTRY_LIST
-
-    global countryData
-
-    # Make a note of the disease parameters
-    p = countryData[c1][:params]
-
-    # Determine optimal parameters for each country
-    result = bboptimize(countryData[c1][:lossFunction],
-                        SearchRange = COUNTRY_RANGE;
-                        Method = :adaptive_de_rand_1_bin,
-                        MaxTime = 20,
-                        TraceMode = :compact)
-
-    println(); println(c1)
-    print("Before         "); @show p
-    print("After  "); @show best_candidate(result)
-
-    countryData[c1][:params] = best_candidate(result)
-end
 
 
 #-------------------------------------------------------------------------------------------------
@@ -216,6 +162,7 @@ result = bboptimize(fullEpidemyLoss,
                     SearchRange = fullRange;
                     Method = :adaptive_de_rand_1_bin,
                     MaxTime = 300,
+                    TargetFitness = 2.0,
                     NThreads = Threads.nthreads(),
                     TraceMode = :compact)
 
