@@ -33,7 +33,7 @@ countryData["Japan"] = populateCountryDate("Japan", :north; useOptimised = false
 
 
 #-------------------------------------------------------------------------------------------------
-country = "Iran"
+country = "France"
 sol = calculateSolution(country,
                         DiseaseParameters,
                         countryData[country][:params];

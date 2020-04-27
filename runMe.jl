@@ -45,12 +45,17 @@ COUNTRY_LIST = [
     ("Spain",                       :north),
     ("Sweden",                      :north),
     ("United_Kingdom",              :north),
-    ("United_States_of_America",              :north)]
+#    ("United_States_of_America",     :north)
+    ]
 
 
 countryData = Dict( c => populateCountryData(c, h, useOptimised = false) for (c, h) in COUNTRY_LIST)
 
-plotVignette()
+plt = plotVignette()
+
+using FileIO, Plots, ImageIO
+Plots.savefig(plt, "Vignette1.png")
+
 plotCountriestoDisk("__beforeOptim")
 saveParameters()
 
@@ -64,9 +69,11 @@ Base.show(io::IO, f::Float64) = @printf(io, "%1.3f", f)
 #-- First calibration
 #--
 updateEveryCountry(;maxtime = 20)
-updateEpidemiologyOnce()
+updateEpidemiologyOnce(maxtime = 120)
 
-plotVignette()
+plt = plotVignette()
+Plots.savefig(plt, "Vignette2.png")
+
 plotCountriestoDisk("__first_calib")
 saveParameters()
 
@@ -75,7 +82,7 @@ saveParameters()
 #--
 #-- Runs of all-country optim - disease parameters
 #--
-N_RUNS = 1
+N_RUNS = 4
 for run in 1:N_RUNS
     #-------------------------------------------------------------------------------------------------
     #--
@@ -93,7 +100,7 @@ for run in 1:N_RUNS
     best = best_candidate(bboptimize(sumCountryLossesCountries,
                                      SearchRange = fullRange;
                                      Method = :adaptive_de_rand_1_bin,
-                                     MaxTime = 1800,
+                                     MaxTime = 180,
                                      TargetFitness = 2.0,
                                      NThreads = Threads.nthreads(),
                                      TraceMode = :compact))

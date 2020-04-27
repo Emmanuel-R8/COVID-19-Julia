@@ -178,7 +178,7 @@ function epiDynamics!(dP, P, params, t)
     mitigationRatio = getCurrentRatio(t; start = BASE_DAYS, schedule = mitigation)
     β = (r₀ * mitigationRatio) .* zₐ
 
-    dS = - (sum(S)  / Population) .* β .* (γₑ.*E + γᵢ.*I + γⱼ.*J + γₖ.*K + γᵣ.*R)
+    dS = - sum(γₑ.*E + γᵢ.*I + γⱼ.*J + γₖ.*K + γᵣ.*R)  / Population .* (S .* β)
     dS = min.(-0.0001, dS)
     dS = ensurePositive(dS, S)
 
